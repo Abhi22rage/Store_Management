@@ -1,0 +1,35 @@
+backend/
+
+src/
+
+config/
+    db.js
+
+controllers/
+    auth.controller.js
+    inventory.controller.js
+    sales.controller.js
+    purchase.controller.js
+    supplier.controller.js
+
+models/
+    User.js
+    Item.js
+    Sale.js
+    Purchase.js
+    Supplier.js
+
+routes/
+    auth.routes.js
+    inventory.routes.js
+    sales.routes.js
+    purchase.routes.js
+    supplier.routes.js
+
+middleware/
+    auth.middleware.js
+    error.middleware.js
+
+utils/
+
+server.js

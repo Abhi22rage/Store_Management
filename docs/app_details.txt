@@ -1,0 +1,71 @@
+# Smart Dukan (Smart Store) - Project Details
+
+## 1. Project Overview
+Smart Dukan is a professional-grade, cloud-native Point of Sale (POS) and Inventory Management system built with Flutter and Supabase. It is designed to modernize shop operations by providing a robust, multi-branch capable platform for sales, stock tracking, and supplier management.
+
+## 2. Primary Uses
+- **Retail Operations**: Streamlining daily sales and invoice generation.
+- **Inventory Control**: Real-time tracking of stock levels across multiple branches.
+- **Supplier Management**: Managing vendor relationships and procurement.
+- **Business Intelligence**: Analyzing sales performance and stock health through a centralized dashboard.
+
+## 3. Technology Stack
+- **Frontend**: Flutter (3.x)
+- **State Management**: flutter_bloc (9.x) with Equatable
+- **Navigation**: GoRouter (17.x)
+- **Backend**: Supabase (PostgreSQL, Storage, Auth)
+- **Reporting**: pdf & printing packages for invoice generation
+- **Data Handling**: excel & csv packages for import/export
+- **UI/UX**: Google Fonts (Inter, Manrope), Skeletonizer for loading states
+
+## 4. Core Features & Functions
+
+### 🏢 Multi-Branch Architecture
+- **Branch Switching**: Ability to manage multiple physical or logical store locations from a single application.
+- **Service Layer**: Managed via `BranchService` with local persistence using SharedPreferences.
+
+### 🛒 Sales & POS Terminal
+- **Multi-item Invoicing**: Support for adding multiple items to a single transaction with real-time tax and total calculations.
+- **PDF Generation**: Automated creation of professional invoices for printing or digital sharing.
+- **Manual Sales**: Interface for recording custom or quick transactions that bypass the standard inventory catalog.
+
+### 📦 Intelligent Inventory
+- **Full CRUD**: Comprehensive management of products, including categories and pricing.
+- **Cloud-Native Media**: Product images are stored in Supabase Storage with built-in cropping and optimization.
+- **Low Stock Alerts**: Visual indicators and notifications for items below safety thresholds.
+- **Category Management**: Hierarchical organization of inventory items.
+
+### 🤝 Supplier & Purchase Module
+- **Supplier Tracking**: Management of vendor contact details and performance history.
+- **Stock Upload Sheets**: Dedicated interface for recording incoming stock and updating inventory levels.
+- **Purchase Auditing**: Historical log of all procurement transactions.
+
+## 5. Built to Date (Implemented Modules)
+
+### Dashboard Feature
+- `DashboardScreen`: Displays key performance indicators, sales charts, and operational summaries.
+
+### Inventory Feature
+- `InventoryScreen`: The main catalog view with search and filter capabilities.
+- `CategoryManagementScreen`: Interface for managing product groupings.
+- `ItemPriceScreen`: Global pricing and markup management tool.
+
+### Sales Feature
+- `SalesScreen`: The primary POS interface used by staff for checkout.
+- `ManualSaleScreen`: Versatile entry form for quick or non-standard sales.
+
+### Purchase Feature
+- `PurchaseScreen`: Audit log of all inventory acquisitions.
+- `AddPurchaseScreen`: Flow for recording new stock arrivals from suppliers.
+- `ManualStockUploadSheet`: Utility for rapid manual stock updates.
+
+### Supplier Feature
+- `SupplierScreen`: Centralized management of the supplier database.
+
+### Auth & Security
+- `LoginScreen` & `SignupScreen`: Secure authentication flows with Role-Based Access Control (RBAC) integration.
+
+## 6. Architecture & Patterns
+- **Layered Design**: Follows a feature-based structure with clear separation of `view`, `bloc`, `widgets`, and `models`.
+- **Dependency Injection**: Services (Auth, Branch, API) are initialized globally for consistent access.
+- **Reactive UI**: State-driven interface ensuring immediate feedback to user actions.

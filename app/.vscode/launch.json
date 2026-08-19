@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "▶ Smart Dukan (Web)",
+      "request": "launch",
+      "type": "dart",
+      "args": ["-d", "chrome"],
+      "preLaunchTask": "start-backend"
+    },
+    {
+      "name": "▶ Smart Dukan (Windows)",
+      "request": "launch",
+      "type": "dart",
+      "args": ["-d", "windows"],
+      "preLaunchTask": "start-backend"
+    },
+    {
+      "name": "Backend ONLY",
+      "request": "launch",
+      "type": "node",
+      "program": "${workspaceFolder}/backend/server.js",
+      "cwd": "${workspaceFolder}/backend"
+    }
+  ]
+}

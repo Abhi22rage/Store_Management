@@ -1,0 +1,43 @@
+lib/
+
+core/
+    constants/
+    theme/
+    utils/
+    services/
+
+features/
+
+    dashboard/
+        model/
+        view/
+        bloc/
+
+    inventory/
+        model/
+        view/
+        bloc/
+
+    sales/
+        model/
+        view/
+        bloc/
+
+    purchase/
+        model/
+        view/
+        bloc/
+
+    suppliers/
+        model/
+        view/
+        bloc/
+
+    settings/
+        model/
+        view/
+        bloc/
+
+routes/
+
+main.dart
