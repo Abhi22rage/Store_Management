@@ -1,14 +1,17 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'package:skeletonizer/skeletonizer.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:smart_store/src/presentation/themes/app_theme.dart';
 import 'package:smart_store/src/core/services/api_service.dart';
 import 'package:smart_store/src/core/services/auth_service.dart';
 import 'package:smart_store/src/core/services/data_repository.dart';
 import 'package:smart_store/src/core/services/branch_service.dart';
+import 'package:smart_store/src/core/services/upi_payment_service.dart';
 import 'package:smart_store/src/presentation/common/branch_selector.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -27,6 +30,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _storePhone = '+91 9876543210';
   String _storeGSTIN = '27AAAAA0000A1Z5';
   String _receiptTagline = 'Thank you for shopping with us!';
+
+  // Account & Payment Settings
+  String _merchantUpiId = 'smartdukan@okhdfcbank';
+  String _upiDisplayName = 'Smart Store';
+  String _businessEmail = 'store@smartdukan.com';
+  String _defaultPaymentMethod = 'UPI';
+  String _gatewayStatus = 'ACTIVE';
+  String _accountHolderName = 'Smart Store Retail LLP';
+  String _bankName = 'HDFC Bank';
+  String _accountNumber = '50200012345678';
+  String _ifscCode = 'HDFC0001234';
+  String _accountType = 'Current';
+  String _settlementStatus = 'Verified';
 
   // Tax & Inventory Settings
   double _lowStockThreshold = 10.0;
@@ -76,6 +92,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _storeGSTIN = remote?['store_gstin'] ?? prefs.getString('store_gstin') ?? '27AAAAA0000A1Z5';
       _receiptTagline = remote?['receipt_tagline'] ?? prefs.getString('receipt_tagline') ?? 'Thank you for shopping with us!';
 
+      // Account & UPI settings
+      _merchantUpiId = remote?['merchant_upi_id'] ?? prefs.getString('merchant_upi_id') ?? 'smartdukan@okhdfcbank';
+      _upiDisplayName = remote?['upi_display_name'] ?? prefs.getString('upi_display_name') ?? _storeName;
+      _businessEmail = remote?['business_email'] ?? prefs.getString('business_email') ?? 'store@smartdukan.com';
+      _defaultPaymentMethod = remote?['default_payment_method'] ?? prefs.getString('default_payment_method') ?? 'UPI';
+      _gatewayStatus = remote?['gateway_status'] ?? prefs.getString('gateway_status') ?? 'ACTIVE';
+      _accountHolderName = remote?['account_holder_name'] ?? prefs.getString('account_holder_name') ?? 'Smart Store Retail LLP';
+      _bankName = remote?['bank_name'] ?? prefs.getString('bank_name') ?? 'HDFC Bank';
+      _accountNumber = remote?['account_number'] ?? prefs.getString('account_number') ?? '50200012345678';
+      _ifscCode = remote?['ifsc_code'] ?? prefs.getString('ifsc_code') ?? 'HDFC0001234';
+      _accountType = remote?['account_type'] ?? prefs.getString('account_type') ?? 'Current';
+      _settlementStatus = remote?['settlement_status'] ?? prefs.getString('settlement_status') ?? 'Verified';
+
       _lowStockThreshold = double.tryParse(remote?['low_stock_threshold']?.toString() ?? '') ?? prefs.getDouble('low_stock_threshold') ?? 10.0;
       _lowStockAlertEnabled = remote?['low_stock_alert_enabled'] ?? prefs.getBool('low_stock_alert_enabled') ?? true;
       _sgst = double.tryParse(remote?['sgst_percent']?.toString() ?? '') ?? prefs.getDouble('sgst_percent') ?? 0.0;
@@ -104,6 +133,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setString('store_phone', _storePhone);
     await prefs.setString('store_gstin', _storeGSTIN);
     await prefs.setString('receipt_tagline', _receiptTagline);
+    await prefs.setString('merchant_upi_id', _merchantUpiId);
+    await prefs.setString('upi_display_name', _upiDisplayName);
+    await prefs.setString('business_email', _businessEmail);
+    await prefs.setString('default_payment_method', _defaultPaymentMethod);
+    await prefs.setString('gateway_status', _gatewayStatus);
+    await prefs.setString('account_holder_name', _accountHolderName);
+    await prefs.setString('bank_name', _bankName);
+    await prefs.setString('account_number', _accountNumber);
+    await prefs.setString('ifsc_code', _ifscCode);
+    await prefs.setString('account_type', _accountType);
+    await prefs.setString('settlement_status', _settlementStatus);
     await prefs.setDouble('low_stock_threshold', _lowStockThreshold);
     await prefs.setBool('low_stock_alert_enabled', _lowStockAlertEnabled);
     await prefs.setDouble('sgst_percent', _sgst);
@@ -129,6 +169,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setString('store_gstin', _storeGSTIN);
     await prefs.setString('receipt_tagline', _receiptTagline);
 
+    await prefs.setString('merchant_upi_id', _merchantUpiId);
+    await prefs.setString('upi_display_name', _upiDisplayName);
+    await prefs.setString('business_email', _businessEmail);
+    await prefs.setString('default_payment_method', _defaultPaymentMethod);
+    await prefs.setString('gateway_status', _gatewayStatus);
+    await prefs.setString('account_holder_name', _accountHolderName);
+    await prefs.setString('bank_name', _bankName);
+    await prefs.setString('account_number', _accountNumber);
+    await prefs.setString('ifsc_code', _ifscCode);
+    await prefs.setString('account_type', _accountType);
+    await prefs.setString('settlement_status', _settlementStatus);
+
     await prefs.setDouble('low_stock_threshold', _lowStockThreshold);
     await prefs.setBool('low_stock_alert_enabled', _lowStockAlertEnabled);
     await prefs.setDouble('sgst_percent', _sgst);
@@ -148,14 +200,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setString('receipt_header', _receiptHeader);
     await prefs.setString('receipt_footer', _receiptFooter);
 
-    // Save permanently to database
-    try {
-      await ApiService().saveStoreSettings({
+    // Immediately notify all app screens (instant UI response)
+    DataRepository().notifySettingsChanged();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Settings saved successfully!'),
+          backgroundColor: AppTheme.accent,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
+    // Save permanently to remote database in background
+    unawaited(
+      ApiService().saveStoreSettings({
         'store_name': _storeName,
         'store_address': _storeAddress,
         'store_phone': _storePhone,
         'store_gstin': _storeGSTIN,
         'receipt_tagline': _receiptTagline,
+        'merchant_upi_id': _merchantUpiId,
+        'upi_display_name': _upiDisplayName,
+        'business_email': _businessEmail,
+        'default_payment_method': _defaultPaymentMethod,
+        'gateway_status': _gatewayStatus,
+        'account_holder_name': _accountHolderName,
+        'bank_name': _bankName,
+        'account_number': _accountNumber,
+        'ifsc_code': _ifscCode,
+        'account_type': _accountType,
+        'settlement_status': _settlementStatus,
         'low_stock_threshold': _lowStockThreshold,
         'low_stock_alert_enabled': _lowStockAlertEnabled,
         'sgst_percent': _sgst,
@@ -171,23 +247,521 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'auto_print_receipt': _autoPrintReceipt,
         'receipt_header': _receiptHeader,
         'receipt_footer': _receiptFooter,
-      });
-    } catch (e) {
-      debugPrint('Error persisting settings to database: $e');
-    }
+      }).catchError((e) {
+        debugPrint('Error persisting settings to database: $e');
+      }),
+    );
+  }
 
-    DataRepository().notifySettingsChanged();
 
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Settings saved successfully!'),
-        backgroundColor: AppTheme.accent,
-        duration: Duration(seconds: 2),
+  // ─── ACCOUNT & PAYMENT SETTINGS DIALOG ────────────────────────────
+  void _showAccountAndPaymentDialog() {
+    final userRole = (AuthProvider.of(context).currentUser?.role ?? 'Staff').toLowerCase();
+    final bool canEdit = userRole == 'owner' || userRole == 'manager';
+
+    final storeNameCtrl = TextEditingController(text: _storeName);
+    final storeAddressCtrl = TextEditingController(text: _storeAddress);
+    final storePhoneCtrl = TextEditingController(text: _storePhone);
+    final emailCtrl = TextEditingController(text: _businessEmail);
+    final gstinCtrl = TextEditingController(text: _storeGSTIN);
+
+    final upiCtrl = TextEditingController(text: _merchantUpiId);
+    final upiNameCtrl = TextEditingController(text: _upiDisplayName);
+    final accHolderCtrl = TextEditingController(text: _accountHolderName);
+    final bankCtrl = TextEditingController(text: _bankName);
+    final accNumCtrl = TextEditingController(text: _accountNumber);
+    final ifscCtrl = TextEditingController(text: _ifscCode);
+
+    String tempDefaultPayment = _defaultPaymentMethod;
+    String tempGatewayStatus = _gatewayStatus;
+    String tempAccountType = _accountType;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final liveUpiId = upiCtrl.text.trim().isNotEmpty ? upiCtrl.text.trim() : 'smartdukan@okhdfcbank';
+          final livePayee = upiNameCtrl.text.trim().isNotEmpty ? upiNameCtrl.text.trim() : 'Smart Store';
+          final liveTestQr = UpiPaymentService.buildUpiQrString(
+            payeeVpa: liveUpiId,
+            payeeName: livePayee,
+            amount: 1.0,
+            invoiceNumber: 'TEST-001',
+            transactionRefId: 'TEST-CFG-${DateTime.now().millisecondsSinceEpoch}',
+          );
+
+          return AlertDialog(
+            backgroundColor: AppTheme.surfaceContainerLowest,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.account_balance_wallet_rounded, color: AppTheme.primary, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Account & Payment Settings',
+                        style: GoogleFonts.manrope(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                      Text(
+                        'Configure merchant UPI, settlement bank & payment gateway',
+                        style: GoogleFonts.inter(fontSize: 11, color: AppTheme.outline),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 580,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!canEdit)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: AppTheme.secondaryContainer.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppTheme.secondary.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.lock_outline_rounded, color: AppTheme.secondary, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'View Only: Only Owner and Manager roles have permission to modify payment settings.',
+                                style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.onSecondaryContainer),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    // SECTION A: MERCHANT & BUSINESS DETAILS
+                    Text(
+                      'MERCHANT & BUSINESS DETAILS',
+                      style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.secondary, letterSpacing: 1.0),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildTextInput('Store / Merchant Name', storeNameCtrl, icon: Icons.store),
+                    const SizedBox(height: 10),
+                    _buildTextInput('Business Address', storeAddressCtrl, icon: Icons.location_on, maxLines: 2),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: _buildTextInput('Contact Phone', storePhoneCtrl, icon: Icons.phone, isPhone: true)),
+                        const SizedBox(width: 10),
+                        Expanded(child: _buildTextInput('Business Email', emailCtrl, icon: Icons.email_outlined)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    _buildTextInput('GSTIN (Tax ID)', gstinCtrl, icon: Icons.receipt_long),
+                    const SizedBox(height: 20),
+                    const Divider(height: 1),
+                    const SizedBox(height: 16),
+
+                    // SECTION B: UPI PAYMENT CONFIGURATION
+                    Text(
+                      'UPI PAYMENT CONFIGURATION',
+                      style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.secondary, letterSpacing: 1.0),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: TextField(
+                            controller: upiCtrl,
+                            enabled: canEdit,
+                            onChanged: (_) => setModalState(() {}),
+                            decoration: InputDecoration(
+                              labelText: 'Merchant UPI ID / VPA *',
+                              hintText: 'e.g. name@bank or store@okaxis',
+                              prefixIcon: const Icon(Icons.alternate_email_rounded, size: 20),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              filled: true,
+                              fillColor: AppTheme.surfaceContainerLow,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: upiNameCtrl,
+                            enabled: canEdit,
+                            onChanged: (_) => setModalState(() {}),
+                            decoration: InputDecoration(
+                              labelText: 'UPI Display Name',
+                              hintText: 'e.g. Smart Store',
+                              prefixIcon: const Icon(Icons.badge_outlined, size: 20),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              filled: true,
+                              fillColor: AppTheme.surfaceContainerLow,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('DEFAULT PAYMENT METHOD', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.outline)),
+                              const SizedBox(height: 6),
+                              DropdownButtonFormField<String>(
+                                initialValue: tempDefaultPayment,
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                  filled: true,
+                                  fillColor: AppTheme.surfaceContainerLow,
+                                  isDense: true,
+                                ),
+                                items: const [
+                                  DropdownMenuItem(value: 'UPI', child: Text('UPI Digital')),
+                                  DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+                                  DropdownMenuItem(value: 'Card', child: Text('Card / POS')),
+                                ],
+                                onChanged: canEdit ? (val) => setModalState(() => tempDefaultPayment = val!) : null,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('GATEWAY STATUS', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.outline)),
+                              const SizedBox(height: 6),
+                              DropdownButtonFormField<String>(
+                                initialValue: tempGatewayStatus,
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                  filled: true,
+                                  fillColor: AppTheme.surfaceContainerLow,
+                                  isDense: true,
+                                ),
+                                items: const [
+                                  DropdownMenuItem(value: 'ACTIVE', child: Text('Active (Direct UPI)')),
+                                  DropdownMenuItem(value: 'SANDBOX', child: Text('Sandbox / Demo Mode')),
+                                ],
+                                onChanged: canEdit ? (val) => setModalState(() => tempGatewayStatus = val!) : null,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // LIVE QR CODE PREVIEW CARD
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.outlineVariant.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppTheme.outlineVariant),
+                            ),
+                            child: QrImageView(
+                              data: liveTestQr,
+                              version: QrVersions.auto,
+                              size: 110.0,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.qr_code_scanner_rounded, size: 16, color: AppTheme.secondary),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'LIVE QR PREVIEW',
+                                      style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.secondary),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Payee: $livePayee',
+                                  style: GoogleFonts.manrope(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primary),
+                                ),
+                                Text(
+                                  'VPA: $liveUpiId',
+                                  style: GoogleFonts.inter(fontSize: 11, color: AppTheme.onSurfaceVariant),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Standards-compliant NPCI UPI Deep Link dynamically configured for instant POS checkout.',
+                                  style: GoogleFonts.inter(fontSize: 10, color: AppTheme.outline),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Divider(height: 1),
+                    const SizedBox(height: 16),
+
+                    // SECTION C: BANK SETTLEMENT ACCOUNT DETAILS
+                    Text(
+                      'BANK SETTLEMENT ACCOUNT DETAILS (OPTIONAL)',
+                      style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.secondary, letterSpacing: 1.0),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: _buildTextInput('Account Holder Name', accHolderCtrl, icon: Icons.person)),
+                        const SizedBox(width: 10),
+                        Expanded(child: _buildTextInput('Bank Name', bankCtrl, icon: Icons.account_balance)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(child: _buildTextInput('Account Number', accNumCtrl, icon: Icons.tag)),
+                        const SizedBox(width: 10),
+                        Expanded(child: _buildTextInput('IFSC Code', ifscCtrl, icon: Icons.pin)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: tempAccountType,
+                            decoration: InputDecoration(
+                              labelText: 'Account Type',
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              filled: true,
+                              fillColor: AppTheme.surfaceContainerLow,
+                              isDense: true,
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 'Current', child: Text('Current Account')),
+                              DropdownMenuItem(value: 'Savings', child: Text('Savings Account')),
+                            ],
+                            onChanged: canEdit ? (val) => setModalState(() => tempAccountType = val!) : null,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.surfaceContainerLow,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppTheme.outlineVariant.withValues(alpha: 0.5)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.verified_rounded, size: 18, color: Color(0xFF047857)),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Settlement: $_settlementStatus',
+                                  style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF047857)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // TEST CONFIGURATION BUTTON
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _showTestQrDialog(upiCtrl.text.trim(), upiNameCtrl.text.trim(), ifscCtrl.text.trim()),
+                        icon: const Icon(Icons.verified_outlined, size: 18, color: AppTheme.secondary),
+                        label: Text(
+                          'TEST CONFIGURATION (VERIFY QR & CODES)',
+                          style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.secondary),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppTheme.secondary),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('CANCEL', style: TextStyle(color: AppTheme.outline)),
+              ),
+              if (canEdit)
+                ElevatedButton(
+                  onPressed: () {
+                    final cleanUpi = upiCtrl.text.trim();
+                    if (!UpiPaymentService.isValidUpiId(cleanUpi)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please enter a valid UPI ID (e.g., storename@bank or mobile@upi)'),
+                          backgroundColor: AppTheme.error,
+                        ),
+                      );
+                      return;
+                    }
+
+                    final cleanIfsc = ifscCtrl.text.trim();
+                    if (accNumCtrl.text.trim().isNotEmpty && cleanIfsc.isNotEmpty && !UpiPaymentService.isValidIfsc(cleanIfsc)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please enter a valid 11-digit IFSC code (e.g., HDFC0001234)'),
+                          backgroundColor: AppTheme.error,
+                        ),
+                      );
+                      return;
+                    }
+
+                    setState(() {
+                      _storeName = storeNameCtrl.text.trim();
+                      _storeAddress = storeAddressCtrl.text.trim();
+                      _storePhone = storePhoneCtrl.text.trim();
+                      _businessEmail = emailCtrl.text.trim();
+                      _storeGSTIN = gstinCtrl.text.trim();
+
+                      _merchantUpiId = cleanUpi;
+                      _upiDisplayName = upiNameCtrl.text.trim().isNotEmpty ? upiNameCtrl.text.trim() : _storeName;
+                      _defaultPaymentMethod = tempDefaultPayment;
+                      _gatewayStatus = tempGatewayStatus;
+
+                      _accountHolderName = accHolderCtrl.text.trim();
+                      _bankName = bankCtrl.text.trim();
+                      _accountNumber = accNumCtrl.text.trim();
+                      _ifscCode = cleanIfsc.toUpperCase();
+                      _accountType = tempAccountType;
+                    });
+
+                    Navigator.pop(context);
+                    _saveSettings();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: AppTheme.onPrimary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  ),
+                  child: const Text('SAVE ACCOUNT SETTINGS'),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
 
+  void _showTestQrDialog(String upiId, String displayName, String ifsc) {
+    final cleanUpi = upiId.isNotEmpty ? upiId : _merchantUpiId;
+    final isUpiValid = UpiPaymentService.isValidUpiId(cleanUpi);
+    final isIfscValid = ifsc.isEmpty || UpiPaymentService.isValidIfsc(ifsc);
+
+    final testQr = UpiPaymentService.buildUpiQrString(
+      payeeVpa: cleanUpi,
+      payeeName: displayName.isNotEmpty ? displayName : _storeName,
+      amount: 1.0,
+      invoiceNumber: 'TEST-DIAGNOSTIC',
+      transactionRefId: 'TXN-TEST-${DateTime.now().millisecondsSinceEpoch}',
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surfaceContainerLowest,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text(
+          'Payment Gateway Diagnostics',
+          style: GoogleFonts.manrope(fontWeight: FontWeight.bold, color: AppTheme.primary),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppTheme.outlineVariant),
+              ),
+              child: QrImageView(
+                data: testQr,
+                version: QrVersions.auto,
+                size: 160.0,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              dense: true,
+              leading: Icon(
+                isUpiValid ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                color: isUpiValid ? const Color(0xFF047857) : AppTheme.error,
+              ),
+              title: Text('UPI ID Format: $cleanUpi', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold)),
+              subtitle: Text(isUpiValid ? 'Valid NPCI VPA format' : 'Invalid UPI pattern', style: GoogleFonts.inter(fontSize: 11)),
+            ),
+            if (ifsc.isNotEmpty)
+              ListTile(
+                dense: true,
+                leading: Icon(
+                  isIfscValid ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                  color: isIfscValid ? const Color(0xFF047857) : AppTheme.error,
+                ),
+                title: Text('Bank IFSC: $ifsc', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold)),
+                subtitle: Text(isIfscValid ? 'Valid RBI IFSC pattern' : 'Invalid IFSC pattern', style: GoogleFonts.inter(fontSize: 11)),
+              ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('CLOSE'),
+          ),
+        ],
+      ),
+    );
+  }
 
   // ─── 1. STORE DETAILS DIALOG ──────────────────────────────────────
   void _showStoreDetailsDialog() {
@@ -1043,7 +1617,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const SizedBox(height: 32),
 
-              // SECTION 2: TAX & INVENTORY
+              // SECTION 2: ACCOUNT & PAYMENT SETTINGS
+              _buildSection(
+                title: 'Account & Payment Settings',
+                children: [
+                  _buildSettingItem(
+                    Icons.qr_code_2_rounded,
+                    'Merchant UPI & Payment Gateway',
+                    'VPA: $_merchantUpiId • Default: $_defaultPaymentMethod • Status: $_gatewayStatus',
+                    onTap: _showAccountAndPaymentDialog,
+                  ),
+                  const Divider(height: 1),
+                  _buildSettingItem(
+                    Icons.account_balance_rounded,
+                    'Settlement Bank Account',
+                    '$_bankName (${_accountNumber.length > 4 ? "...${_accountNumber.substring(_accountNumber.length - 4)}" : _accountNumber}) • IFSC: $_ifscCode',
+                    onTap: _showAccountAndPaymentDialog,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+
+              // SECTION 3: TAX & INVENTORY
               _buildSection(
                 title: 'Tax & Inventory Rules',
                 children: [

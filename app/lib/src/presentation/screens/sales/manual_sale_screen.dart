@@ -5,10 +5,13 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:smart_store/src/presentation/themes/app_theme.dart';
 import 'package:smart_store/src/core/services/api_service.dart';
-import 'package:smart_store/src/core/services/pdf_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smart_store/src/core/services/branch_service.dart';
 import 'package:smart_store/src/core/services/data_repository.dart';
+import 'package:smart_store/src/core/models/item_variant_model.dart';
+import 'package:smart_store/src/core/services/upi_payment_service.dart';
+import 'package:smart_store/src/presentation/screens/sales/widgets/upi_payment_dialog.dart';
+import 'package:smart_store/src/presentation/screens/sales/widgets/invoice_receipt_dialog.dart';
 
 class _LineItem {
   Map<String, dynamic>? selectedItem;
@@ -55,6 +58,7 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
   double _cgstPercent = 0.0;
   double _igstPercent = 0.0;
   bool _isInterState = false;
+  String _selectedPaymentMethod = 'Cash';
 
   // Invoice header
   late String _invoiceNumber;
@@ -89,7 +93,18 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
     super.dispose();
   }
 
+  Future<void> _loadTaxSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _sgstPercent = prefs.getDouble('sgst_percent') ?? 0.0;
+      _cgstPercent = prefs.getDouble('cgst_percent') ?? 0.0;
+      _igstPercent = prefs.getDouble('igst_percent') ?? 0.0;
+    });
+  }
+
   void _onDataRepoChanged() {
+    _loadTaxSettings();
     final cachedInv = DataRepository().getCachedInventory(BranchService().currentBranch);
     if (cachedInv != null && mounted) {
       setState(() {
@@ -150,6 +165,7 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
       sizes.add(s.trim());
     }
 
+    sizes.sort((a, b) => ItemVariant.compareSizes(a, b));
     return sizes;
   }
 
@@ -241,6 +257,49 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
     li.pricePerPiece = foundPrice;
   }
 
+  double _getCostPriceForLineItem(_LineItem li) {
+    if (li.isCustom || li.selectedItem == null) return 0.0;
+    final item = li.selectedItem!;
+    if (item['variants'] != null && item['variants'] is List) {
+      for (var v in (item['variants'] as List)) {
+        if (v is Map) {
+          final String colorName =
+              (v['color'] ?? v['variant_name'] ?? v['name'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+          final bool colorMatch = li.selectedColor == null ||
+              li.selectedColor!.isEmpty ||
+              colorName == li.selectedColor!.toLowerCase() ||
+              colorName.isEmpty ||
+              colorName == 'default';
+
+          if (colorMatch && v['sizes'] is List) {
+            for (var sz in (v['sizes'] as List)) {
+              if (sz is Map) {
+                final String szName =
+                    (sz['size'] ?? '').toString().trim().toLowerCase();
+                if (li.selectedSize == null ||
+                    li.selectedSize!.isEmpty ||
+                    szName == li.selectedSize!.toLowerCase()) {
+                  final double cost = double.tryParse(
+                          (sz['costPrice'] ?? sz['cost_price'] ?? 0)
+                              .toString()) ??
+                      0.0;
+                  if (cost > 0) return cost;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return double.tryParse(
+            (item['price'] ?? item['costPrice'] ?? item['cost_price'] ?? 0)
+                .toString()) ??
+        0.0;
+  }
+
   double get _subTotal => _lineItems.fold(0, (sum, li) => sum + li.totalPrice);
 
   double get _discount => double.tryParse(_discountCtrl.text) ?? 0;
@@ -291,14 +350,17 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
     }
   }
 
-  Future<void> _saveSale() async {
-    // Validation
+  Future<void> _saveSale({bool shouldPrint = false}) async {
     final validItems = _lineItems
         .where((li) {
           if (li.isCustom) {
-            return li.customNameController.text.trim().isNotEmpty && li.pricePerPiece > 0;
+            return li.customNameController.text.trim().isNotEmpty &&
+                li.pricePerPiece > 0 &&
+                li.quantity > 0;
           }
-          return li.selectedItem != null;
+          return li.selectedItem != null &&
+              li.quantity > 0 &&
+              li.pricePerPiece > 0;
         })
         .toList();
     if (validItems.isEmpty) {
@@ -306,6 +368,38 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
         const SnackBar(content: Text('Please select or enter at least one valid item')),
       );
       return;
+    }
+
+    if (_grandTotal < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid payable total amount')),
+      );
+      return;
+    }
+
+    // Dynamic UPI Payment Dialog if UPI is selected
+    UpiPaymentTransaction? verifiedUpiTxn;
+    if (_selectedPaymentMethod == 'UPI') {
+      final merchantConfig = await UpiPaymentService().getMerchantPaymentConfig();
+      if (!mounted) return;
+
+      final result = await showDialog<UpiPaymentTransaction>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => UpiPaymentDialog(
+          invoiceNumber: _invoiceNumber,
+          payableAmount: _grandTotal,
+          storeName: merchantConfig['upiName'] ?? 'Smart Store',
+          merchantUpiId: merchantConfig['upiId'] ?? 'smartdukan@okhdfcbank',
+          isSandbox: merchantConfig['gatewayStatus'] == 'SANDBOX',
+        ),
+      );
+
+      // If user cancelled, abort without saving or creating sale
+      if (result == null) {
+        return;
+      }
+      verifiedUpiTxn = result;
     }
 
     setState(() => _isSaving = true);
@@ -328,7 +422,7 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
               'size': li.isCustom ? '' : (li.selectedSize ?? ''),
               'color': li.isCustom ? li.customDescController.text.trim() : (li.selectedColor ?? ''),
               'quantity': li.quantity,
-              'costPrice': li.isCustom ? 0.0 : (double.tryParse(li.selectedItem!['price']?.toString() ?? '0') ?? 0.0),
+              'costPrice': _getCostPriceForLineItem(li),
               'pricePerPiece': li.pricePerPiece,
               'totalPrice': li.totalPrice,
             },
@@ -344,28 +438,48 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
       },
       'discount': _discount,
       'grandTotal': _grandTotal,
+      'paymentMethod': _selectedPaymentMethod,
+      'paymentStatus': 'PAID',
+      if (verifiedUpiTxn != null) ...{
+        'transactionRefId': verifiedUpiTxn.transactionRefId,
+        'gateway_txn_id': verifiedUpiTxn.gatewayTxnId ?? verifiedUpiTxn.transactionRefId,
+        'payment_details': 'UPI Ref: ${verifiedUpiTxn.gatewayTxnId ?? verifiedUpiTxn.transactionRefId}',
+      },
       'branch': BranchService().currentBranch,
     };
 
     try {
-      final createdSale = await _apiService.createInvoiceSale(
-        invoice,
-        branch: BranchService().currentBranch,
-      );
+      dynamic createdSale;
+      try {
+        createdSale = await _apiService
+            .createInvoiceSale(
+              invoice,
+              branch: BranchService().currentBranch,
+            )
+            .timeout(
+              const Duration(seconds: 4),
+              onTimeout: () => invoice,
+            );
+      } catch (err) {
+        debugPrint('[ManualSale] createInvoiceSale error, using local invoice fallback: $err');
+        createdSale = invoice;
+      }
       if (!mounted) return;
 
       final saleData =
-          createdSale is Map<String, dynamic> ? createdSale : invoice;
+          createdSale is Map<String, dynamic> ? Map<String, dynamic>.from(createdSale) : invoice;
+      
+      if (verifiedUpiTxn != null) {
+        saleData['transactionRefId'] = verifiedUpiTxn.transactionRefId;
+        saleData['gateway_txn_id'] = verifiedUpiTxn.gatewayTxnId;
+        saleData['paymentStatus'] = 'PAID';
+        saleData['paymentMethod'] = 'UPI';
+      }
+
       DataRepository().addLocalSale(
         saleData,
         branch: BranchService().currentBranch,
       );
-      DataRepository().getSales(
-        branch: BranchService().currentBranch,
-        forceRefresh: true,
-      );
-
-      _showSuccessDialog(saleData);
 
       // Reset form
       setState(() {
@@ -374,6 +488,7 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
         _customerNameCtrl.clear();
         _customerPhoneCtrl.clear();
         _discountCtrl.text = '0';
+        _selectedPaymentMethod = 'Cash';
         for (var li in _lineItems) {
           li.dispose();
         }
@@ -381,7 +496,12 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
         _lineItems.add(_LineItem());
         _isSaving = false;
       });
-      _loadData(); // Refresh stock
+
+      // Background data sync so stock & history update without blocking UI
+      _loadData();
+
+      // Show final invoice dialog with Print, Download & Share
+      _showFinalInvoiceDialog(saleData);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSaving = false);
@@ -391,96 +511,23 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
     }
   }
 
-  void _showSuccessDialog(Map<String, dynamic> invoice) {
+  void _showFinalInvoiceDialog(Map<String, dynamic> sale) async {
+    final prefs = await SharedPreferences.getInstance();
+    final storeDetails = {
+      'store_name': prefs.getString('store_name') ?? 'Smart Store',
+      'store_address': prefs.getString('store_address') ?? 'Main Road, Sample City',
+      'store_phone': prefs.getString('store_phone') ?? '+91 9876543210',
+      'store_gstin': prefs.getString('store_gstin') ?? '27AAAAA0000A1Z5',
+      'receipt_tagline': prefs.getString('receipt_tagline') ?? 'Thank you for shopping with us!',
+    };
+
+    if (!mounted) return;
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF16A34A).withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.check_circle,
-                size: 48,
-                color: Color(0xFF16A34A),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Sale Successful!',
-              style: GoogleFonts.manrope(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Invoice ${invoice['invoiceNumber']} has been saved.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(color: AppTheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 32),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () =>
-                        PdfService.generateAndPrintInvoice(invoice),
-                    icon: const Icon(Icons.print, size: 18),
-                    label: const Text('PRINT'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () =>
-                        PdfService.generateAndShareInvoice(invoice),
-                    icon: const Icon(Icons.share, size: 18),
-                    label: const Text('SHARE'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: AppTheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text('DONE'),
-              ),
-            ),
-          ],
-        ),
+      barrierDismissible: true,
+      builder: (ctx) => InvoiceReceiptDialog(
+        saleData: sale,
+        storeDetails: storeDetails,
       ),
     );
   }
@@ -1517,7 +1564,33 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          Text(
+            'PAYMENT METHOD',
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.outline,
+              letterSpacing: 1.0,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildManualPaymentMethod('Cash', Icons.payments, _selectedPaymentMethod == 'Cash'),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildManualPaymentMethod('Card', Icons.credit_card, _selectedPaymentMethod == 'Card'),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildManualPaymentMethod('UPI', Icons.qr_code_2, _selectedPaymentMethod == 'UPI'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _isSaving ? null : _saveSale,
             style: ElevatedButton.styleFrom(
@@ -1538,13 +1611,24 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
                       color: Colors.white,
                     ),
                   )
-                : Text(
-                    'SAVE SALE',
-                    style: GoogleFonts.inter(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      letterSpacing: 1,
-                    ),
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (_selectedPaymentMethod == 'UPI') ...[
+                        const Icon(Icons.qr_code_2_rounded, size: 20),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        _selectedPaymentMethod == 'UPI'
+                            ? 'PROCEED TO PAYMENT (₹${_grandTotal.toStringAsFixed(2)})'
+                            : 'SAVE SALE (₹${_grandTotal.toStringAsFixed(2)})',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
                   ),
           ),
         ],
@@ -1867,6 +1951,41 @@ class _ManualSaleScreenState extends State<ManualSaleScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildManualPaymentMethod(String text, IconData icon, bool selected) {
+    return InkWell(
+      onTap: () => setState(() => _selectedPaymentMethod = text),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.primary : AppTheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? AppTheme.primary : AppTheme.outlineVariant,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: selected ? Colors.white : AppTheme.primary,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              text,
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: selected ? Colors.white : AppTheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

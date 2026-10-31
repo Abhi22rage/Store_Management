@@ -91,15 +91,89 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
       double lastMonthTotal = 0;
       double monthlyProfit = 0;
       
-      // Cost price & Name lookup maps from inventory
-      final Map<String, double> costPrices = {};
+      // Comprehensive Cost price & Retail lookup maps from inventory (including variants & sizes)
+      final Map<String, double> costById = {};
+      final Map<String, double> costByBarcode = {};
+      final Map<String, double> costByKey = {};
       final Map<String, double> costByName = {};
+      final Map<String, double> retailById = {};
+      final Map<String, double> retailByName = {};
+
       for (var item in inventory) {
+        if (item is! Map) continue;
         final idStr = item['id']?.toString() ?? '';
-        final nameKey = (item['name']?.toString() ?? '').toLowerCase().trim();
-        final cost = double.tryParse(item['price']?.toString() ?? '0') ?? 0.0;
-        if (idStr.isNotEmpty) costPrices[idStr] = cost;
-        if (nameKey.isNotEmpty) costByName[nameKey] = cost;
+        final rawName = item['name']?.toString() ?? '';
+        final nameKey = rawName.toLowerCase().trim();
+        final baseCost = double.tryParse((item['price'] ?? item['costPrice'] ?? '0').toString()) ?? 0.0;
+        final baseRetail = double.tryParse((item['retailPrice'] ?? item['retail_price'] ?? '0').toString()) ?? 0.0;
+
+        if (idStr.isNotEmpty && baseCost > 0) costById[idStr] = baseCost;
+        if (idStr.isNotEmpty && baseRetail > 0) retailById[idStr] = baseRetail;
+        if (nameKey.isNotEmpty && baseCost > 0) costByName[nameKey] = baseCost;
+        if (nameKey.isNotEmpty && baseRetail > 0) retailByName[nameKey] = baseRetail;
+
+        final rawVars = item['variants'];
+        if (rawVars is List && rawVars.isNotEmpty) {
+          double totalVariantCost = 0.0;
+          double totalVariantRetail = 0.0;
+          int variantCount = 0;
+
+          for (var v in rawVars) {
+            if (v is! Map) continue;
+            final colorName = (v['color'] ?? v['variant_name'] ?? '').toString().toLowerCase().trim();
+            final sizes = v['sizes'];
+            if (sizes is List && sizes.isNotEmpty) {
+              for (var sz in sizes) {
+                if (sz is! Map) continue;
+                final szId = sz['id']?.toString() ?? '';
+                final szName = (sz['size'] ?? '').toString().toLowerCase().trim();
+                final barcode = (sz['barcode'] ?? '').toString().trim().toUpperCase();
+                final cPrice = double.tryParse((sz['cost_price'] ?? sz['costPrice'] ?? '0').toString()) ?? 0.0;
+                final rPrice = double.tryParse((sz['retail_price'] ?? sz['retailPrice'] ?? '0').toString()) ?? 0.0;
+
+                if (cPrice > 0) {
+                  totalVariantCost += cPrice;
+                  variantCount++;
+                  if (szId.isNotEmpty) costById[szId] = cPrice;
+                  if (barcode.isNotEmpty) costByBarcode[barcode] = cPrice;
+                  if (idStr.isNotEmpty && szName.isNotEmpty && colorName.isNotEmpty) {
+                    costByKey['${idStr}_${szName}_$colorName'] = cPrice;
+                  }
+                  if (idStr.isNotEmpty && szName.isNotEmpty) {
+                    costByKey['${idStr}_$szName'] = cPrice;
+                  }
+                  if (nameKey.isNotEmpty && szName.isNotEmpty && colorName.isNotEmpty) {
+                    costByKey['${nameKey}_${szName}_$colorName'] = cPrice;
+                  }
+                  if (nameKey.isNotEmpty && szName.isNotEmpty) {
+                    costByKey['${nameKey}_$szName'] = cPrice;
+                  }
+                }
+                if (rPrice > 0) {
+                  totalVariantRetail += rPrice;
+                  if (szId.isNotEmpty) retailById[szId] = rPrice;
+                  if (idStr.isNotEmpty && szName.isNotEmpty) {
+                    retailById['${idStr}_$szName'] = rPrice;
+                  }
+                }
+              }
+            }
+          }
+
+          if (variantCount > 0) {
+            final avgCost = totalVariantCost / variantCount;
+            final avgRetail = totalVariantRetail / variantCount;
+            if (!costById.containsKey(idStr) || costById[idStr] == 0) {
+              costById[idStr] = avgCost;
+            }
+            if (!costByName.containsKey(nameKey) || costByName[nameKey] == 0) {
+              costByName[nameKey] = avgCost;
+            }
+            if (!retailByName.containsKey(nameKey) || retailByName[nameKey] == 0) {
+              retailByName[nameKey] = avgRetail;
+            }
+          }
+        }
       }
       
       final prevDay = now.subtract(const Duration(days: 1));
@@ -109,7 +183,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
         final dateStr = sale['createdAt'] ?? sale['date'];
         if (dateStr == null) continue;
         final saleDate = DateTime.parse(dateStr.toString()).toLocal();
-        final amountStr = sale['grandTotal'] ?? sale['totalAmount'] ?? '0';
+        final amountStr = sale['grandTotal'] ?? sale['totalAmount'] ?? sale['final_amount'] ?? '0';
         final amount = double.tryParse(amountStr.toString()) ?? 0.0;
         
         // This Month
@@ -136,33 +210,91 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
               ? (sale['items'] as List)
               : ((sale['sale_items'] is List) ? (sale['sale_items'] as List) : []);
 
+          double invoiceGrossProfit = 0.0;
+
           for (var si in saleItems) {
             final itemDetails = si is Map && si.containsKey('items') && si['items'] is Map ? si['items'] : si;
             final id = (itemDetails['itemId'] ?? itemDetails['item_id'] ?? itemDetails['id'])?.toString();
-            final nameKey = (itemDetails['name'] ?? '').toString().toLowerCase().trim();
-            final qty = int.tryParse((si['quantity'] ?? itemDetails['quantity'] ?? '0').toString()) ?? 0;
+            final cleanId = id != null && id.contains('_') ? id.split('_').first : id;
+            final nameKey = (itemDetails['name'] ?? itemDetails['item_name'] ?? '').toString().toLowerCase().trim();
+            final sizeKey = (itemDetails['size'] ?? si['size'] ?? '').toString().toLowerCase().trim();
+            final colorKey = (itemDetails['color'] ?? si['color'] ?? '').toString().toLowerCase().trim();
+            final barcodeKey = (itemDetails['barcode'] ?? si['barcode'] ?? '').toString().toUpperCase().trim();
+
+            final qty = int.tryParse((si['quantity'] ?? itemDetails['quantity'] ?? '1').toString()) ?? 1;
             if (qty <= 0) continue;
 
-            final sell = double.tryParse(
-              (si['unit_price'] ?? si['pricePerPiece'] ?? si['price'] ?? itemDetails['retailPrice'] ?? itemDetails['price'] ?? 0).toString(),
+            // Selling price per piece
+            double sell = double.tryParse(
+              (si['unit_price'] ?? si['pricePerPiece'] ?? si['price'] ?? itemDetails['retailPrice'] ?? itemDetails['retail_price'] ?? 0).toString(),
             ) ?? 0.0;
 
-            // Multi-layer cost price resolution
+            if (sell <= 0) {
+              final subtotal = double.tryParse((si['subtotal'] ?? si['totalPrice'] ?? 0).toString()) ?? 0.0;
+              if (subtotal > 0) {
+                sell = subtotal / qty;
+              }
+            }
+
+            if (sell <= 0 && cleanId != null && retailById.containsKey(cleanId)) {
+              sell = retailById[cleanId]!;
+            }
+            if (sell <= 0 && nameKey.isNotEmpty && retailByName.containsKey(nameKey)) {
+              sell = retailByName[nameKey]!;
+            }
+
+            // Multi-layer cost price resolution:
+            // 1. Direct recorded cost price
             double cost = double.tryParse(
-              (si['costPrice'] ?? si['cost_price'] ?? itemDetails['costPrice'] ?? itemDetails['price'] ?? 0).toString(),
+              (si['costPrice'] ?? si['cost_price'] ?? itemDetails['costPrice'] ?? itemDetails['cost_price'] ?? 0).toString(),
             ) ?? 0.0;
 
-            if (cost <= 0 && id != null && costPrices.containsKey(id)) {
-              cost = costPrices[id]!;
+            // 2. Look up by Barcode
+            if (cost <= 0 && barcodeKey.isNotEmpty && costByBarcode.containsKey(barcodeKey)) {
+              cost = costByBarcode[barcodeKey]!;
+            }
+
+            // 3. Look up by composite keys (id_size_color, id_size, name_size_color, name_size)
+            if (cost <= 0 && cleanId != null && sizeKey.isNotEmpty && colorKey.isNotEmpty) {
+              cost = costByKey['${cleanId}_${sizeKey}_$colorKey'] ?? 0.0;
+            }
+            if (cost <= 0 && cleanId != null && sizeKey.isNotEmpty) {
+              cost = costByKey['${cleanId}_$sizeKey'] ?? 0.0;
+            }
+            if (cost <= 0 && nameKey.isNotEmpty && sizeKey.isNotEmpty && colorKey.isNotEmpty) {
+              cost = costByKey['${nameKey}_${sizeKey}_$colorKey'] ?? 0.0;
+            }
+            if (cost <= 0 && nameKey.isNotEmpty && sizeKey.isNotEmpty) {
+              cost = costByKey['${nameKey}_$sizeKey'] ?? 0.0;
+            }
+
+            // 4. Look up by Item ID or Item Name
+            if (cost <= 0 && cleanId != null && costById.containsKey(cleanId)) {
+              cost = costById[cleanId]!;
             }
             if (cost <= 0 && nameKey.isNotEmpty && costByName.containsKey(nameKey)) {
               cost = costByName[nameKey]!;
             }
 
             // Profit = (selling price - cost price) * quantity
-            final profitPerUnit = (sell > cost && cost > 0) ? (sell - cost) : (sell * 0.20);
-            monthlyProfit += profitPerUnit * qty;
+            double profitPerUnit = 0.0;
+            if (sell > 0 && cost > 0) {
+              profitPerUnit = sell - cost;
+            } else if (sell > 0 && cost <= 0) {
+              profitPerUnit = sell * 0.25;
+            }
+
+            invoiceGrossProfit += profitPerUnit * qty;
           }
+
+          if (saleItems.isEmpty && amount > 0) {
+            invoiceGrossProfit = amount * 0.25;
+          }
+
+          // Deduct invoice-level discount from profit
+          final double discount = double.tryParse((sale['discount'] ?? '0').toString()) ?? 0.0;
+          final double netSaleProfit = (invoiceGrossProfit - discount).clamp(0.0, double.infinity);
+          monthlyProfit += netSaleProfit;
         }
       }
 
@@ -236,10 +368,11 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
     final Map<String, double> inventoryRetailByName = {};
 
     for (var item in inventory) {
+      if (item is! Map) continue;
       final idStr = item['id']?.toString() ?? '';
       final nameKey = (item['name']?.toString() ?? '').toLowerCase().trim();
-      final retPrice = double.tryParse(item['retailPrice']?.toString() ?? '0') ?? 0.0;
-      final costPrice = double.tryParse(item['price']?.toString() ?? '0') ?? 0.0;
+      final retPrice = double.tryParse((item['retailPrice'] ?? item['retail_price'] ?? '0').toString()) ?? 0.0;
+      final costPrice = double.tryParse((item['price'] ?? item['costPrice'] ?? '0').toString()) ?? 0.0;
       final effectiveRetail = retPrice > 0 ? retPrice : (costPrice > 0 ? costPrice * 2.0 : 0.0);
 
       if (idStr.isNotEmpty && effectiveRetail > 0) {
@@ -247,6 +380,29 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
       }
       if (nameKey.isNotEmpty && effectiveRetail > 0) {
         inventoryRetailByName[nameKey] = effectiveRetail;
+      }
+
+      final rawVars = item['variants'];
+      if (rawVars is List && rawVars.isNotEmpty) {
+        for (var v in rawVars) {
+          if (v is! Map) continue;
+          final sizes = v['sizes'];
+          if (sizes is List && sizes.isNotEmpty) {
+            for (var sz in sizes) {
+              if (sz is! Map) continue;
+              final szId = sz['id']?.toString() ?? '';
+              final szRet = double.tryParse((sz['retail_price'] ?? sz['retailPrice'] ?? '0').toString()) ?? 0.0;
+              final szCost = double.tryParse((sz['cost_price'] ?? sz['costPrice'] ?? '0').toString()) ?? 0.0;
+              final eff = szRet > 0 ? szRet : (szCost > 0 ? szCost * 2.0 : 0.0);
+              if (szId.isNotEmpty && eff > 0) {
+                inventoryRetailPrices[szId] = eff;
+              }
+              if (nameKey.isNotEmpty && eff > 0 && (!inventoryRetailByName.containsKey(nameKey) || inventoryRetailByName[nameKey] == 0)) {
+                inventoryRetailByName[nameKey] = eff;
+              }
+            }
+          }
+        }
       }
     }
 

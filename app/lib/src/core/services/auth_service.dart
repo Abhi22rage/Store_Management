@@ -171,19 +171,30 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<String?> signup(String credential, String password, String role) async {
+  Future<String?> signup({
+    required String credential,
+    required String password,
+    required String role,
+    String? branchId,
+    String? branchName,
+    String? name,
+  }) async {
     try {
       final isEmail = credential.contains('@');
       final response = await supabase.Supabase.instance.client.auth.signUp(
         email: isEmail ? credential : null,
         phone: !isEmail ? credential : null,
         password: password,
-        data: {'role': role},
+        data: {
+          'name': name ?? (isEmail ? credential.split('@').first : 'New User'),
+          'role': role,
+          if (branchId != null && branchId.isNotEmpty) 'branch_id': branchId,
+          if (branchName != null && branchName.isNotEmpty) 'branch_name': branchName,
+        },
       );
       
       if (response.user != null) {
-        // Create profile record if it doesn't exist via trigger, or manually here if needed
-        // Assuming a trigger handles profile creation on signup
+        // Profile record is created automatically via Supabase trigger on_auth_user_created
         return null;
       }
       return 'Signup failed';

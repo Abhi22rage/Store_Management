@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import 'package:smart_store/src/presentation/themes/app_theme.dart';
 import 'package:smart_store/src/core/services/auth_service.dart';
 
@@ -17,14 +18,61 @@ class _SignupScreenState extends State<SignupScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   String _selectedRole = 'owner';
+  String? _selectedBranchId;
+  String? _selectedBranchName;
   bool _isLoading = false;
+  bool _isLoadingBranches = true;
   bool _obscurePassword = true;
+
+  List<Map<String, dynamic>> _branches = [];
 
   final List<Map<String, String>> _roles = [
     {'value': 'owner', 'label': 'Store Owner'},
     {'value': 'manager', 'label': 'Manager'},
     {'value': 'staff', 'label': 'Sales Staff'},
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchBranches();
+  }
+
+  Future<void> _fetchBranches() async {
+    try {
+      final response = await supabase.Supabase.instance.client
+          .from('branches')
+          .select('id, name')
+          .order('name', ascending: true);
+
+      final List<Map<String, dynamic>> loadedBranches =
+          List<Map<String, dynamic>>.from(response);
+
+      if (mounted) {
+        setState(() {
+          _branches = loadedBranches;
+          if (_branches.isNotEmpty) {
+            _selectedBranchId = _branches.first['id']?.toString();
+            _selectedBranchName = _branches.first['name']?.toString();
+          }
+          _isLoadingBranches = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('[SignupScreen] Error fetching branches: $e');
+      if (mounted) {
+        setState(() {
+          // Fallback if table is still loading or offline
+          _branches = [
+            {'id': '', 'name': 'Main Store'},
+            {'id': '', 'name': 'Warehouse'},
+          ];
+          _selectedBranchName = 'Main Store';
+          _isLoadingBranches = false;
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -46,7 +94,13 @@ class _SignupScreenState extends State<SignupScreen> {
       return;
     }
 
-    final errorMessage = await widget.authService.signup(email, password, _selectedRole);
+    final errorMessage = await widget.authService.signup(
+      credential: email,
+      password: password,
+      role: _selectedRole,
+      branchId: _selectedBranchId,
+      branchName: _selectedBranchName,
+    );
     if (!mounted) return;
     setState(() => _isLoading = false);
 
@@ -95,7 +149,7 @@ class _SignupScreenState extends State<SignupScreen> {
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Registration failed: $errorMessage', textAlign: TextAlign.center,)),
+        SnackBar(content: Text('Registration failed: $errorMessage', textAlign: TextAlign.center)),
       );
     }
   }
@@ -145,14 +199,14 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 48),
+                    const SizedBox(height: 40),
                     _buildTextField(
                       controller: _emailController,
                       label: 'Email Address',
                       icon: Icons.email_outlined,
                       keyboardType: TextInputType.emailAddress,
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
                     _buildTextField(
                       controller: _passwordController,
                       label: 'Password',
@@ -166,9 +220,11 @@ class _SignupScreenState extends State<SignupScreen> {
                         onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
                     _buildRoleDropdown(),
-                    const SizedBox(height: 48),
+                    const SizedBox(height: 20),
+                    _buildBranchDropdown(),
+                    const SizedBox(height: 40),
                     ElevatedButton(
                       onPressed: _isLoading ? null : _handleSignup,
                       style: ElevatedButton.styleFrom(
@@ -289,6 +345,78 @@ class _SignupScreenState extends State<SignupScreen> {
           },
         ),
       ),
+    );
+  }
+
+  Widget _buildBranchDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: _isLoadingBranches
+          ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 12),
+                  Text('Loading branches...', style: TextStyle(color: AppTheme.outline, fontSize: 13)),
+                ],
+              ),
+            )
+          : DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedBranchId ?? (_branches.isNotEmpty ? _branches.first['id']?.toString() : null),
+                hint: const Row(
+                  children: [
+                    Icon(Icons.storefront_outlined, color: Color(0xFF767683), size: 20),
+                    SizedBox(width: 12),
+                    Text('Select Branch'),
+                  ],
+                ),
+                icon: const Icon(Icons.keyboard_arrow_down, color: AppTheme.outline),
+                isExpanded: true,
+                style: GoogleFonts.nunitoSans(
+                  fontSize: 14,
+                  color: AppTheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+                dropdownColor: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                items: _branches.map((branch) {
+                  final branchId = branch['id']?.toString() ?? '';
+                  final branchName = branch['name']?.toString() ?? 'Branch';
+                  return DropdownMenuItem<String>(
+                    value: branchId,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.storefront_outlined, color: Color(0xFF767683), size: 20),
+                        const SizedBox(width: 12),
+                        Text(branchName),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                onChanged: (String? newBranchId) {
+                  if (newBranchId != null) {
+                    final branch = _branches.firstWhere(
+                      (b) => b['id']?.toString() == newBranchId,
+                      orElse: () => {'id': newBranchId, 'name': 'Main Store'},
+                    );
+                    setState(() {
+                      _selectedBranchId = newBranchId;
+                      _selectedBranchName = branch['name']?.toString();
+                    });
+                  }
+                },
+              ),
+            ),
     );
   }
 }

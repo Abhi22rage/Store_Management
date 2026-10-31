@@ -397,6 +397,118 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  PreferredSizeWidget _buildNormalAppBar() {
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      centerTitle: true,
+      leading: context.canPop()
+          ? IconButton(
+              icon: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: AppTheme.primary,
+                size: 20,
+              ),
+              onPressed: () => context.pop(),
+            )
+          : null,
+      title: Text(
+        'ITEMS OVERVIEW',
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.w900,
+          color: AppTheme.primary,
+          letterSpacing: 2.0,
+        ),
+      ),
+      actions: [
+        IconButton(
+          tooltip: 'Refresh',
+          icon: const Icon(
+            Icons.refresh_rounded,
+            color: AppTheme.primary,
+          ),
+          onPressed: _loadData,
+        ),
+        IconButton(
+          tooltip: 'Settings',
+          icon: const Icon(
+            Icons.settings_outlined,
+            color: AppTheme.primary,
+          ),
+          onPressed: () => context.push('/settings'),
+        ),
+        PopupMenuButton<String>(
+          tooltip: 'More options',
+          icon: const Icon(
+            Icons.more_vert_rounded,
+            color: AppTheme.primary,
+          ),
+          onSelected: (val) {
+            if (val == 'view') {
+              setState(() => _isListView = !_isListView);
+            }
+            if (val == 'categories') {
+              context.push('/inventory/categories');
+            }
+            if (val == 'export_csv') _exportData('csv');
+            if (val == 'export_xlsx') _exportData('xlsx');
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'view',
+              child: Row(
+                children: [
+                  Icon(
+                    _isListView
+                        ? Icons.grid_view_rounded
+                        : Icons.view_list_rounded,
+                    size: 20,
+                    color: AppTheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(_isListView ? 'Grid View' : 'List View'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'categories',
+              child: Row(
+                children: [
+                  Icon(Icons.category_outlined, size: 20),
+                  SizedBox(width: 12),
+                  Text('Categories'),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'export_csv',
+              child: const Row(
+                children: [
+                  Icon(Icons.download_rounded, size: 20),
+                  SizedBox(width: 12),
+                  Text('Export CSV'),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'export_xlsx',
+              child: const Row(
+                children: [
+                  Icon(Icons.table_chart_rounded, size: 20),
+                  SizedBox(width: 12),
+                  Text('Export Excel'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 8),
+      ],
+    );
+  }
+
   void _showBulkAddDialog() {
     showModalBottomSheet(
       context: context,
@@ -540,124 +652,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
     return Scaffold(
       appBar: _isSelectionMode
           ? _buildSelectionAppBar()
-          : AppBar(
-              backgroundColor: AppTheme.background,
-              elevation: 0,
-              centerTitle: true,
-              automaticallyImplyLeading: false,
-              title: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.network(
-                    'https://img.icons8.com/3d-fluency/94/package.png',
-                    width: 20,
-                    height: 20,
-                    errorBuilder: (context, error, stackTrace) => const Icon(
-                      Icons.inventory_2_outlined,
-                      size: 20,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'INVENTORY',
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w900,
-                      color: AppTheme.primary,
-                      letterSpacing: 2.0,
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(
-                    Icons.refresh,
-                    size: 24,
-                    color: AppTheme.primary,
-                  ),
-                  onPressed: _loadData,
-                ),
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(
-                    Icons.settings_outlined,
-                    size: 24,
-                    color: AppTheme.primary,
-                  ),
-                  tooltip: 'Settings',
-                  onPressed: () => context.push('/settings'),
-                ),
-                PopupMenuButton<String>(
-                  icon: const Icon(
-                    Icons.more_vert_rounded,
-                    color: AppTheme.primary,
-                  ),
-                  onSelected: (val) {
-                    if (val == 'view') {
-                      setState(() => _isListView = !_isListView);
-                    }
-                    if (val == 'categories') {
-                      context.push('/inventory/categories');
-                    }
-                    if (val == 'export_csv') _exportData('csv');
-                    if (val == 'export_xlsx') _exportData('xlsx');
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      value: 'view',
-                      child: Row(
-                        children: [
-                          Icon(
-                            _isListView
-                                ? Icons.grid_view_rounded
-                                : Icons.view_list_rounded,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(_isListView ? 'Grid View' : 'List View'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'categories',
-                      child: Row(
-                        children: [
-                          Icon(Icons.category_outlined, size: 20),
-                          SizedBox(width: 12),
-                          Text('Categories'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuDivider(),
-                    PopupMenuItem(
-                      value: 'export_csv',
-                      child: const Row(
-                        children: [
-                          Icon(Icons.download_rounded, size: 20),
-                          SizedBox(width: 12),
-                          Text('Export CSV'),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'export_xlsx',
-                      child: const Row(
-                        children: [
-                          Icon(Icons.table_chart_rounded, size: 20),
-                          SizedBox(width: 12),
-                          Text('Export Excel'),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 8),
-              ],
-            ),
-      body: Skeletonizer(
+          : _buildNormalAppBar(),
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: Skeletonizer(
         enabled: _isLoading,
         containersColor: AppTheme.outline,
         effect: ShimmerEffect(
@@ -667,30 +666,19 @@ class _InventoryScreenState extends State<InventoryScreen> {
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(height: 8),
-                    Wrap(
-                      alignment: WrapAlignment.spaceBetween,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 16,
-                      runSpacing: 8,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Stock & Price Overview',
-                          style: GoogleFonts.manrope(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.primary,
-                          ),
-                        ),
                         TextButton.icon(
                           onPressed: () =>
                               context.push('/inventory/categories'),
-                          icon: const Icon(Icons.category_outlined, size: 20),
+                          icon: const Icon(Icons.category_outlined,
+                              size: 18),
                           label: Text(
                             'PRIME CATEGORIES',
                             style: GoogleFonts.inter(
@@ -701,20 +689,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           ),
                           style: TextButton.styleFrom(
                             foregroundColor: AppTheme.secondary,
+                            padding: EdgeInsets.zero,
+                            minimumSize: const Size(0, 0),
+                            tapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Real-time stock tracking and pricing management.',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        color: AppTheme.onSurfaceVariant,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 16),
                     _buildSearchAndFilter(),
                     if (_showLowStockOnly) ...[
                       const SizedBox(height: 12),
@@ -758,6 +741,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ],
         ),
       ),
+    ),
       floatingActionButton: _isSelectionMode
           ? null
           : FloatingActionButton.extended(
@@ -1176,18 +1160,18 @@ class _VariantItemRowCardState extends State<VariantItemRowCard> {
     return GestureDetector(
       onTap: imgStr.isNotEmpty ? () => _showEnlargedImage(context, item) : null,
       child: Container(
-        width: 100,
-        height: 120,
+        width: 72,
+        height: 72,
         decoration: BoxDecoration(
           color: AppTheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Stack(
           children: [
             Positioned.fill(
               child: imgStr.isNotEmpty
                   ? ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                       child: imgStr.startsWith('data:image/')
                           ? Image.memory(
                               base64Decode(imgStr.split(',').last),
@@ -1197,7 +1181,7 @@ class _VariantItemRowCardState extends State<VariantItemRowCard> {
                                     child: Icon(
                                       Icons.checkroom_outlined,
                                       color: AppTheme.outline,
-                                      size: 36,
+                                      size: 26,
                                     ),
                                   ),
                             )
@@ -1209,7 +1193,7 @@ class _VariantItemRowCardState extends State<VariantItemRowCard> {
                                     child: Icon(
                                       Icons.checkroom_outlined,
                                       color: AppTheme.outline,
-                                      size: 36,
+                                      size: 26,
                                     ),
                                   ),
                             ),
@@ -1218,16 +1202,43 @@ class _VariantItemRowCardState extends State<VariantItemRowCard> {
                       child: Icon(
                         Icons.checkroom_outlined,
                         color: AppTheme.outline,
-                        size: 36,
+                        size: 26,
                       ),
                     ),
             ),
+            if (widget.isSelectionMode)
+              Positioned(
+                top: 4,
+                left: 4,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 3,
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    widget.isSelected
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked,
+                    color: widget.isSelected
+                        ? AppTheme.primary
+                        : AppTheme.outline,
+                    size: 18,
+                  ),
+                ),
+              ),
             if (imgStr.isNotEmpty)
               Positioned(
-                right: 4,
-                bottom: 4,
+                right: 3,
+                bottom: 3,
                 child: Container(
-                  padding: const EdgeInsets.all(4),
+                  padding: const EdgeInsets.all(3),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.5),
                     shape: BoxShape.circle,
@@ -1235,7 +1246,7 @@ class _VariantItemRowCardState extends State<VariantItemRowCard> {
                   child: const Icon(
                     Icons.zoom_in,
                     color: Colors.white,
-                    size: 14,
+                    size: 11,
                   ),
                 ),
               ),
@@ -1255,7 +1266,8 @@ class _VariantItemRowCardState extends State<VariantItemRowCard> {
 
     final color =
         widget.variant?.color ?? (widget.item['color']?.toString() ?? '');
-    final sizes = widget.variant?.sizes ?? [];
+    final List<VariantSize> sizes = List.from(widget.variant?.sizes ?? []);
+    sizes.sort((a, b) => ItemVariant.compareSizes(a.size, b.size));
 
     VariantSize? activeSize;
     if (widget.variant != null && sizes.isNotEmpty) {
@@ -1320,13 +1332,13 @@ class _VariantItemRowCardState extends State<VariantItemRowCard> {
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.all(24),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: widget.isSelected
               ? AppTheme.primary.withValues(alpha: 0.05)
               : AppTheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: widget.isSelected
                 ? AppTheme.primary
@@ -1338,432 +1350,366 @@ class _VariantItemRowCardState extends State<VariantItemRowCard> {
               : [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
                   ),
                 ],
         ),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (widget.isSelectionMode) ...[
-              Padding(
-                padding: const EdgeInsets.only(top: 36.0, right: 16.0),
-                child: Icon(
-                  widget.isSelected
-                      ? Icons.check_circle
-                      : Icons.radio_button_unchecked,
-                  color: widget.isSelected
-                      ? AppTheme.primary
-                      : AppTheme.outline,
-                  size: 24,
-                ),
-              ),
-            ],
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildImageContainer(widget.item),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildImageContainer(widget.item),
-                      const SizedBox(width: 20),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                      // Header: Title, Variant badge, Status badge, 3-dot menu
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 6,
+                              runSpacing: 4,
                               children: [
-                                Expanded(
-                                  child: Wrap(
-                                    crossAxisAlignment:
-                                        WrapCrossAlignment.center,
-                                    spacing: 10,
-                                    runSpacing: 6,
-                                    children: [
-                                      Text(
-                                        parentName,
-                                        style: GoogleFonts.manrope(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: AppTheme.primary,
-                                        ),
-                                      ),
-                                      if (color.isNotEmpty)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 3,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.primaryContainer,
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'Variant: $color',
-                                            style: GoogleFonts.inter(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.bold,
-                                              color:
-                                                  AppTheme.onPrimaryContainer,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
+                                Text(
+                                  parentName,
+                                  style: GoogleFonts.manrope(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.primary,
                                   ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                const SizedBox(width: 12),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: statusBgColor,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    statusLabel,
-                                    style: GoogleFonts.inter(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
+                                if (color.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryContainer,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      'Variant: $color',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppTheme.onPrimaryContainer,
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             ),
-                            if (category.isNotEmpty) ...[
-                              const SizedBox(height: 6),
-                              Text(
-                                category,
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  color: AppTheme.outline,
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: statusBgColor,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              statusLabel,
+                              style: GoogleFonts.inter(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 2),
+                          PopupMenuButton<String>(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
+                            icon: const Icon(
+                              Icons.more_vert,
+                              color: AppTheme.primary,
+                              size: 18,
+                            ),
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit_outlined, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Edit'),
+                                  ],
                                 ),
                               ),
-                            ],
-                            const SizedBox(height: 16),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      // Row 1: Size dropdown & Cost Rate
-                                      Wrap(
-                                        spacing: 12,
-                                        runSpacing: 8,
-                                        crossAxisAlignment:
-                                            WrapCrossAlignment.center,
-                                        children: [
-                                          if (sizes.isNotEmpty)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 3,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.surfaceContainerLow,
-                                                borderRadius: BorderRadius.circular(
-                                                  10,
-                                                ),
-                                                border: Border.all(
-                                                  color: AppTheme.outlineVariant,
-                                                ),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Text(
-                                                    'Size: ',
-                                                    style: GoogleFonts.inter(
-                                                      fontSize: 11,
-                                                      fontWeight: FontWeight.bold,
-                                                      color: AppTheme.outline,
-                                                    ),
-                                                  ),
-                                                  DropdownButtonHideUnderline(
-                                                    child: DropdownButton<String>(
-                                                      value: activeSize?.id,
-                                                      icon: const Icon(
-                                                        Icons.arrow_drop_down,
-                                                        color: AppTheme.primary,
-                                                      ),
-                                                      isDense: true,
-                                                      items: sizes.map((sz) {
-                                                        return DropdownMenuItem<
-                                                          String
-                                                        >(
-                                                          value: sz.id,
-                                                          child: Text(
-                                                            sz.size,
-                                                            style:
-                                                                GoogleFonts.inter(
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  fontSize: 13,
-                                                                  color: AppTheme
-                                                                      .primary,
-                                                                ),
-                                                          ),
-                                                        );
-                                                      }).toList(),
-                                                      onChanged: (newId) {
-                                                        if (newId != null) {
-                                                          setState(() {
-                                                            _selectedSize = sizes
-                                                                .firstWhere(
-                                                                  (s) =>
-                                                                      s.id == newId,
-                                                                  orElse: () =>
-                                                                      sizes.first,
-                                                                );
-                                                          });
-                                                        }
-                                                      },
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            )
-                                          else if (widget.item['size'] != null &&
-                                              widget.item['size']
-                                                  .toString()
-                                                  .isNotEmpty)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: AppTheme.surfaceContainerLow,
-                                                borderRadius: BorderRadius.circular(
-                                                  10,
-                                                ),
-                                                border: Border.all(
-                                                  color: AppTheme.outlineVariant,
-                                                ),
-                                              ),
-                                              child: Text(
-                                                'Size: ${widget.item['size']}',
-                                                style: GoogleFonts.inter(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: AppTheme.primary,
-                                                ),
-                                              ),
-                                            ),
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'COST RATE',
-                                                style: GoogleFonts.inter(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: AppTheme.outline,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                '₹${cost.toStringAsFixed(2)}',
-                                                style: GoogleFonts.manrope(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: AppTheme.onSurface,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      // Row 2: Margin & Barcode / SKU
-                                      Wrap(
-                                        spacing: 12,
-                                        runSpacing: 8,
-                                        crossAxisAlignment:
-                                            WrapCrossAlignment.center,
-                                        children: [
-                                          Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'MARGIN',
-                                                style: GoogleFonts.inter(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: AppTheme.outline,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                marginStr,
-                                                style: GoogleFonts.manrope(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: AppTheme.secondary,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          if (barcode.isNotEmpty)
-                                            Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  'BARCODE / SKU',
-                                                  style: GoogleFonts.inter(
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: AppTheme.outline,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  barcode,
-                                                  style: GoogleFonts.jetBrainsMono(
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: AppTheme.secondary,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  width: 1,
-                                  height: 36,
-                                  color: AppTheme.surfaceVariant,
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                  ),
-                                ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
                                   children: [
-                                    Text(
-                                      'STOCK',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: AppTheme.outline,
-                                      ),
+                                    Icon(
+                                      Icons.delete_outline,
+                                      size: 18,
+                                      color: AppTheme.error,
                                     ),
-                                    const SizedBox(height: 2),
+                                    SizedBox(width: 8),
                                     Text(
-                                      '$stock units',
-                                      style: GoogleFonts.manrope(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w600,
-                                        color: stock > 0
-                                            ? AppTheme.onSurface
-                                            : AppTheme.error,
-                                      ),
+                                      'Delete',
+                                      style: TextStyle(color: AppTheme.error),
                                     ),
                                   ],
                                 ),
-                              ],
+                              ),
+                            ],
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                widget.onEdit();
+                              } else if (value == 'delete') {
+                                widget.onDelete();
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                      if (category.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          category,
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.categoryBadgeText,
+                            letterSpacing: 0.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      // Size selector & Barcode / SKU
+                      Row(
+                        children: [
+                          if (sizes.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.surfaceContainerLow,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: AppTheme.outlineVariant,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Size: ',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.outline,
+                                    ),
+                                  ),
+                                  DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: activeSize?.id,
+                                      icon: const Icon(
+                                        Icons.arrow_drop_down,
+                                        color: AppTheme.primary,
+                                        size: 18,
+                                      ),
+                                      isDense: true,
+                                      items: sizes.map((sz) {
+                                        return DropdownMenuItem<String>(
+                                          value: sz.id,
+                                          child: Text(
+                                            sz.size,
+                                            style: GoogleFonts.inter(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 11,
+                                              color: AppTheme.primary,
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                      onChanged: (newId) {
+                                        if (newId != null) {
+                                          setState(() {
+                                            _selectedSize = sizes.firstWhere(
+                                              (s) => s.id == newId,
+                                              orElse: () => sizes.first,
+                                            );
+                                          });
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else if (widget.item['size'] != null &&
+                              widget.item['size'].toString().isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.surfaceContainerLow,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: AppTheme.outlineVariant,
+                                ),
+                              ),
+                              child: Text(
+                                'Size: ${widget.item['size']}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                            ),
+                          if (barcode.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                barcode,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.jetBrainsMono(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.barcodeBadgeText,
+                                ),
+                              ),
                             ),
                           ],
-                        ),
+                        ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 20),
-                  const Divider(height: 1),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            'RETAIL PRICE',
-                            style: GoogleFonts.inter(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.outline,
-                            ),
-                          ),
-                          Text(
-                            '₹${retail.toStringAsFixed(2)}',
-                            style: GoogleFonts.manrope(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 16),
-                      PopupMenuButton<String>(
-                        icon: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: AppTheme.outline.withValues(alpha: 0.5),
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.more_vert,
-                            color: AppTheme.primary,
-                            size: 20,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Metrics bar (Cost Rate, Margin, Stock, Retail Price)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceContainerLow.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  // Cost Rate
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'COST',
+                          style: GoogleFonts.inter(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.outline,
                           ),
                         ),
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: 'edit',
-                            child: Row(
-                              children: [
-                                Icon(Icons.edit_outlined, size: 18),
-                                SizedBox(width: 8),
-                                Text('Edit'),
-                              ],
-                            ),
+                        const SizedBox(height: 1),
+                        Text(
+                          '₹${cost.toStringAsFixed(0)}',
+                          style: GoogleFonts.manrope(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.onSurface,
                           ),
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.delete_outline,
-                                  size: 18,
-                                  color: AppTheme.error,
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Delete',
-                                  style: TextStyle(color: AppTheme.error),
-                                ),
-                              ],
-                            ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Margin
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'MARGIN',
+                          style: GoogleFonts.inter(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.outline,
                           ),
-                        ],
-                        onSelected: (value) {
-                          if (value == 'edit') {
-                            widget.onEdit();
-                          } else if (value == 'delete') {
-                            widget.onDelete();
-                          }
-                        },
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          marginStr,
+                          style: GoogleFonts.manrope(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.secondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Stock
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'STOCK',
+                          style: GoogleFonts.inter(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.outline,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          '$stock units',
+                          style: GoogleFonts.manrope(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: stock > 0
+                                ? AppTheme.onSurface
+                                : AppTheme.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Retail Price
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        'RETAIL PRICE',
+                        style: GoogleFonts.inter(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.outline,
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        '₹${retail.toStringAsFixed(2)}',
+                        style: GoogleFonts.manrope(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.primary,
+                        ),
                       ),
                     ],
                   ),
@@ -1911,7 +1857,8 @@ class _VariantItemGridCardState extends State<VariantItemGridCard> {
 
     final color =
         widget.variant?.color ?? (widget.item['color']?.toString() ?? '');
-    final sizes = widget.variant?.sizes ?? [];
+    final List<VariantSize> sizes = List.from(widget.variant?.sizes ?? []);
+    sizes.sort((a, b) => ItemVariant.compareSizes(a.size, b.size));
 
     VariantSize? activeSize = _selectedSize;
     if (widget.variant != null && sizes.isNotEmpty) {
@@ -2079,11 +2026,14 @@ class _VariantItemGridCardState extends State<VariantItemGridCard> {
                     ],
                   ),
                   if (category.isNotEmpty) ...[
+                    const SizedBox(height: 4),
                     Text(
                       category,
                       style: GoogleFonts.inter(
                         fontSize: 11,
-                        color: AppTheme.outline,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.categoryBadgeText,
+                        letterSpacing: 0.2,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -2160,11 +2110,11 @@ class _VariantItemGridCardState extends State<VariantItemGridCard> {
                   if (barcode.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'SKU: $barcode',
+                      barcode,
                       style: GoogleFonts.jetBrainsMono(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: AppTheme.secondary,
+                        color: AppTheme.barcodeBadgeText,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

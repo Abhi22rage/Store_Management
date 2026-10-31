@@ -12,11 +12,13 @@ import 'package:smart_store/src/presentation/themes/app_theme.dart';
 import 'package:smart_store/src/core/services/api_service.dart';
 import 'package:smart_store/src/core/services/data_repository.dart';
 import 'package:smart_store/src/core/services/export_service.dart';
-import 'package:smart_store/src/core/services/pdf_service.dart';
 import 'package:smart_store/src/core/utils/csv_helper.dart';
 import 'package:smart_store/src/presentation/screens/dashboard/widgets/custom_range_picker.dart';
 import 'package:smart_store/src/core/services/branch_service.dart';
 import 'package:smart_store/src/core/models/item_variant_model.dart';
+import 'package:smart_store/src/core/services/upi_payment_service.dart';
+import 'package:smart_store/src/presentation/screens/sales/widgets/upi_payment_dialog.dart';
+import 'package:smart_store/src/presentation/screens/sales/widgets/invoice_receipt_dialog.dart';
 
 enum DateFilter { all, today, singleDate, lastMonth, custom }
 
@@ -503,6 +505,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                 'color': selectedVar.color,
                                 'size': selectedSize!.size,
                                 'price': selectedSize!.costPrice > 0 ? selectedSize!.costPrice : item['price'],
+                                'costPrice': selectedSize!.costPrice > 0 ? selectedSize!.costPrice : (double.tryParse((item['costPrice'] ?? item['cost_price'] ?? item['price'] ?? 0).toString()) ?? 0.0),
                                 'retailPrice': selectedSize!.retailPrice > 0 ? selectedSize!.retailPrice : item['retailPrice'],
                                 'stock': selectedSize!.stock,
                                 'barcode': selectedSize!.barcode,
@@ -633,6 +636,39 @@ class _SalesScreenState extends State<SalesScreen> {
   Future<void> _completeSale() async {
     if (_cart.isEmpty || _isCompletingSale) return;
 
+    final double payableAmount = _total;
+    if (payableAmount < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid payable amount'), backgroundColor: AppTheme.error),
+      );
+      return;
+    }
+
+    // STEP 1: Dynamic UPI Payment Screen if UPI payment is selected
+    UpiPaymentTransaction? verifiedUpiTxn;
+    if (_selectedPaymentMethod == 'UPI') {
+      final merchantConfig = await UpiPaymentService().getMerchantPaymentConfig();
+      if (!mounted) return;
+
+      final result = await showDialog<UpiPaymentTransaction>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => UpiPaymentDialog(
+          invoiceNumber: _digitalBillId,
+          payableAmount: payableAmount,
+          storeName: merchantConfig['upiName'] ?? 'Smart Store',
+          merchantUpiId: merchantConfig['upiId'] ?? 'smartdukan@okhdfcbank',
+          isSandbox: merchantConfig['gatewayStatus'] == 'SANDBOX',
+        ),
+      );
+
+      // If user cancelled, abort gracefully without inserting or deducting stock
+      if (result == null) {
+        return;
+      }
+      verifiedUpiTxn = result;
+    }
+
     setState(() => _isCompletingSale = true);
     try {
       final invoice = {
@@ -644,10 +680,12 @@ class _SalesScreenState extends State<SalesScreen> {
         'customerPhone': _customerPhoneCtrl.text,
         'items': _cart.values.map((entry) {
           final item = entry['item'];
-          final double cost =
-              double.tryParse(item['price']?.toString() ?? '0') ?? 0;
+          final double cost = double.tryParse(
+                  (item['costPrice'] ?? item['cost_price'] ?? item['price'] ?? '0')
+                      .toString()) ??
+              0;
           final double ret =
-              double.tryParse(item['retailPrice']?.toString() ?? '0') ?? 0;
+              double.tryParse((item['retailPrice'] ?? item['retail_price'] ?? '0').toString()) ?? 0;
           final double effectivePrice = ret > 0
               ? ret
               : (cost > 0 ? cost * 2.0 : 0);
@@ -677,24 +715,49 @@ class _SalesScreenState extends State<SalesScreen> {
         'discount': _discount,
         'grandTotal': _total,
         'paymentMethod': _selectedPaymentMethod,
+        'paymentStatus': 'PAID',
+        if (verifiedUpiTxn != null) ...{
+          'transactionRefId': verifiedUpiTxn.transactionRefId,
+          'gateway_txn_id': verifiedUpiTxn.gatewayTxnId ?? verifiedUpiTxn.transactionRefId,
+          'payment_details': 'UPI UTR: ${verifiedUpiTxn.gatewayTxnId ?? verifiedUpiTxn.transactionRefId}',
+        },
       };
 
-      final createdSale = await _apiService.createInvoiceSale(
-        invoice,
-        branch: BranchService().currentBranch,
-      );
+      dynamic createdSale;
+      try {
+        createdSale = await _apiService
+            .createInvoiceSale(
+              invoice,
+              branch: BranchService().currentBranch,
+            )
+            .timeout(
+              const Duration(seconds: 4),
+              onTimeout: () {
+                debugPrint('[SalesScreen] createInvoiceSale timed out, falling back to local invoice');
+                return invoice;
+              },
+            );
+      } catch (err) {
+        debugPrint('[SalesScreen] createInvoiceSale error, falling back to local invoice: $err');
+        createdSale = invoice;
+      }
 
       if (!mounted) return;
 
       final saleData =
-          createdSale is Map<String, dynamic> ? createdSale : invoice;
+          createdSale is Map<String, dynamic> ? Map<String, dynamic>.from(createdSale) : invoice;
+
+      if (verifiedUpiTxn != null) {
+        saleData['transactionRefId'] = verifiedUpiTxn.transactionRefId;
+        saleData['gateway_txn_id'] = verifiedUpiTxn.gatewayTxnId;
+        saleData['paymentStatus'] = 'PAID';
+        saleData['paymentMethod'] = 'UPI';
+      }
 
       setState(() {
-        if (createdSale is Map<String, dynamic>) {
-          _salesHistory.insert(0, createdSale);
-          _sortSalesHistory();
-          _currentPage = 1;
-        }
+        _salesHistory.insert(0, saleData);
+        _sortSalesHistory();
+        _currentPage = 1;
         _cart.clear();
         _customerNameCtrl.clear();
         _customerPhoneCtrl.clear();
@@ -707,8 +770,8 @@ class _SalesScreenState extends State<SalesScreen> {
       // Background data sync so stock & history update without blocking UI
       _loadData();
 
-      // Show success popup dialog!
-      _showSaleSuccessDialog(saleData);
+      // Show final invoice screen with Print, Download & Share
+      _showFinalInvoiceDialog(saleData);
     } catch (e) {
       if (!mounted) return;
       setState(() => _isCompletingSale = false);
@@ -721,192 +784,26 @@ class _SalesScreenState extends State<SalesScreen> {
     }
   }
 
-  void _showSaleSuccessDialog(Map<String, dynamic> sale) {
-    final currencyFormat = NumberFormat.currency(symbol: '₹', decimalDigits: 2);
-    final String invoiceNo =
-        sale['invoiceNumber'] ?? sale['invoice_number'] ?? _digitalBillId;
-    final String custName =
-        sale['customerName'] ?? sale['customer_name'] ?? 'Walk-in Customer';
-    final double grandTotal = double.tryParse(
-            (sale['grandTotal'] ?? sale['total'] ?? 0).toString()) ??
-        0.0;
-    final String payMethod =
-        sale['paymentMethod'] ?? sale['payment_method'] ?? 'Cash';
-    final List itemsList = (sale['items'] as List?) ?? [];
+  void _showFinalInvoiceDialog(Map<String, dynamic> sale) async {
+    final prefs = await SharedPreferences.getInstance();
+    final storeDetails = {
+      'store_name': prefs.getString('store_name') ?? 'Smart Store',
+      'store_address': prefs.getString('store_address') ?? 'Main Road, Sample City',
+      'store_phone': prefs.getString('store_phone') ?? '+91 9876543210',
+      'store_gstin': prefs.getString('store_gstin') ?? '27AAAAA0000A1Z5',
+      'receipt_tagline': prefs.getString('receipt_tagline') ?? 'Thank you for shopping with us!',
+    };
 
+    if (!mounted) return;
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        contentPadding: const EdgeInsets.all(24),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF16A34A).withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.check_circle_rounded,
-                size: 52,
-                color: Color(0xFF16A34A),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Sale Completed!',
-              style: GoogleFonts.manrope(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Digital Bill #$invoiceNo',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: AppTheme.outline,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                    color: AppTheme.outline.withValues(alpha: 0.15)),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Total Amount',
-                          style: GoogleFonts.inter(
-                              fontSize: 13, color: AppTheme.outline)),
-                      Text(
-                        currencyFormat.format(grandTotal),
-                        style: GoogleFonts.manrope(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF16A34A),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Customer',
-                          style: GoogleFonts.inter(
-                              fontSize: 12, color: AppTheme.outline)),
-                      Text(custName,
-                          style: GoogleFonts.inter(
-                              fontSize: 12, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Payment Method',
-                          style: GoogleFonts.inter(
-                              fontSize: 12, color: AppTheme.outline)),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          payMethod.toUpperCase(),
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (itemsList.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('Items Count',
-                            style: GoogleFonts.inter(
-                                fontSize: 12, color: AppTheme.outline)),
-                        Text('${itemsList.length} item(s)',
-                            style: GoogleFonts.inter(
-                                fontSize: 12, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      PdfService.generateAndPrintInvoice(sale);
-                    },
-                    icon: const Icon(Icons.print_rounded, size: 18),
-                    label: const Text('PRINT'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      PdfService.generateAndShareInvoice(sale);
-                    },
-                    icon: const Icon(Icons.share_rounded, size: 18),
-                    label: const Text('SHARE'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => Navigator.pop(ctx),
-                icon: const Icon(Icons.add_shopping_cart_rounded, size: 18),
-                label: const Text('NEW SALE'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: AppTheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-          ],
-        ),
+      barrierDismissible: true,
+      builder: (ctx) => InvoiceReceiptDialog(
+        saleData: sale,
+        storeDetails: storeDetails,
+        onNewSale: () {
+          // Ready for new sale
+        },
       ),
     );
   }
@@ -1741,27 +1638,16 @@ class _SalesScreenState extends State<SalesScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () =>
-                                PdfService.generateAndPrintInvoice(sale),
-                            icon: const Icon(Icons.print, size: 18),
-                            label: const Text('PRINT RECEIPT'),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () =>
-                                PdfService.generateAndShareInvoice(sale),
-                            icon: const Icon(Icons.share, size: 18),
-                            label: const Text('DOWNLOAD'),
-                            style: OutlinedButton.styleFrom(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _showFinalInvoiceDialog(sale);
+                            },
+                            icon: const Icon(Icons.receipt_long_rounded, size: 18),
+                            label: const Text('VIEW & PRINT INVOICE'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: AppTheme.onPrimary,
                               padding: const EdgeInsets.symmetric(vertical: 16),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
@@ -2028,7 +1914,7 @@ class _SalesScreenState extends State<SalesScreen> {
               )
             : null,
         title: Text(
-          'POS TERMINAL',
+          'INVOICE MANAGEMENT',
           style: GoogleFonts.inter(
             fontSize: 14,
             fontWeight: FontWeight.w900,
@@ -2103,27 +1989,6 @@ class _SalesScreenState extends State<SalesScreen> {
           padding: const EdgeInsets.all(24.0),
           child: Column(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Sales Management',
-                          style: GoogleFonts.manrope(
-                            fontSize: 32,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 32),
               _buildCartSection(context),
               const SizedBox(height: 32),
               _buildSalesHistory(),
@@ -2620,10 +2485,21 @@ class _SalesScreenState extends State<SalesScreen> {
                             ),
                           ],
                         )
-                      : const Text(
-                          'COMPLETE SALE',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 14),
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_selectedPaymentMethod == 'UPI') ...[
+                              const Icon(Icons.qr_code_2_rounded, size: 20),
+                              const SizedBox(width: 8),
+                            ],
+                            Text(
+                              _selectedPaymentMethod == 'UPI'
+                                  ? 'PROCEED TO PAYMENT (₹${_formatAmount(_total)})'
+                                  : 'COMPLETE SALE (₹${_formatAmount(_total)})',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                          ],
                         ),
                 ),
                 const SizedBox(height: 12),

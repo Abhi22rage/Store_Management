@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Smart Store (Development)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "app",
+      "program": "lib/main.dart",
+      "args": [
+        "--dart-define=ENV=dev"
+      ]
+    },
+    {
+      "name": "Smart Store (Production)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "app",
+      "program": "lib/main.dart",
+      "args": [
+        "--dart-define=ENV=prod"
+      ]
+    }
+  ]
+}

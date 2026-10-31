@@ -203,6 +203,80 @@ class DataRepository extends ChangeNotifier {
     }
   }
 
+  void deductItemStockLocally(String itemId, {String? color, String? size, int quantity = 1}) {
+    _inventoryCache.forEach((branchKey, items) {
+      for (var item in items) {
+        if (item is Map<String, dynamic> && item['id']?.toString() == itemId) {
+          final soldColor = (color ?? '').trim().toLowerCase();
+          final soldSize = (size ?? '').trim().toLowerCase();
+          bool sizeDeducted = false;
+
+          if (item['variants'] is List && (item['variants'] as List).isNotEmpty) {
+            for (var v in (item['variants'] as List)) {
+              if (v is Map) {
+                final vColor = (v['color'] ?? v['variant_name'] ?? '').toString().trim().toLowerCase();
+                final bool colorMatch = soldColor.isEmpty || vColor == soldColor || vColor == 'default';
+                if (colorMatch && v['sizes'] is List) {
+                  for (var sz in (v['sizes'] as List)) {
+                    if (sz is Map) {
+                      final szName = (sz['size'] ?? '').toString().trim().toLowerCase();
+                      if (soldSize.isEmpty || szName == soldSize) {
+                        final cur = int.tryParse(sz['stock']?.toString() ?? '0') ?? 0;
+                        sz['stock'] = (cur - quantity).clamp(0, 999999);
+                        sizeDeducted = true;
+                        break;
+                      }
+                    }
+                  }
+                }
+              }
+              if (sizeDeducted) break;
+            }
+
+            // Fallback: match size across any variant
+            if (!sizeDeducted && soldSize.isNotEmpty) {
+              for (var v in (item['variants'] as List)) {
+                if (v is Map && v['sizes'] is List) {
+                  for (var sz in (v['sizes'] as List)) {
+                    if (sz is Map) {
+                      final szName = (sz['size'] ?? '').toString().trim().toLowerCase();
+                      if (szName == soldSize) {
+                        final cur = int.tryParse(sz['stock']?.toString() ?? '0') ?? 0;
+                        sz['stock'] = (cur - quantity).clamp(0, 999999);
+                        sizeDeducted = true;
+                        break;
+                      }
+                    }
+                  }
+                }
+                if (sizeDeducted) break;
+              }
+            }
+
+            // Recalculate total item stock
+            int newTotal = 0;
+            for (var v in (item['variants'] as List)) {
+              if (v is Map && v['sizes'] is List) {
+                for (var sz in (v['sizes'] as List)) {
+                  if (sz is Map) {
+                    newTotal += (int.tryParse(sz['stock']?.toString() ?? '0') ?? 0);
+                  }
+                }
+              }
+            }
+            item['stock'] = newTotal;
+          } else {
+            final cur = int.tryParse(item['stock']?.toString() ?? '0') ?? 0;
+            item['stock'] = (cur - quantity).clamp(0, 999999);
+          }
+          item['stockUpdatedAt'] = DateTime.now().toIso8601String();
+        }
+      }
+      _saveDiskList('cached_inventory_$branchKey', items);
+    });
+    notifyListeners();
+  }
+
   void updateLocalItemStock(String itemId, Map<String, dynamic> updateData) {
     _inventoryCache.forEach((branchKey, items) {
       for (var item in items) {

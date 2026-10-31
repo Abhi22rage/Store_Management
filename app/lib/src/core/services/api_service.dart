@@ -3,8 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../env/env.dart';
+import '../models/item_variant_model.dart';
 import 'data_repository.dart';
-import 'package:smart_store/src/core/models/item_variant_model.dart';
 
 class ApiService {
   static SupabaseClient get _db => Supabase.instance.client;
@@ -20,6 +20,7 @@ class ApiService {
   static final Map<String, String> _branchIdCache = {};
   static final Map<String, String> _categoryIdCache = {};
   static final Map<String, String> _supplierIdCache = {};
+  static String? _cachedStoreSettingsId;
 
   Future<void> warmupCaches() async {
     try {
@@ -777,7 +778,7 @@ class ApiService {
           'p_final_amount': grandTotal,
           'p_payment_method': invoice['paymentMethod'] ?? 'Cash',
           'p_items': itemsForRpc,
-        });
+        }).timeout(const Duration(seconds: 4));
       } catch (rpcErr) {
         debugPrint('[ApiService] RPC createInvoiceSale failed ($rpcErr), executing direct fallback insert...');
         final payloadToInsert = <String, dynamic>{
@@ -794,7 +795,7 @@ class ApiService {
           if (invoice['date'] != null) 'sale_date': invoice['date'],
         };
         try {
-          final saleInsert = await _db.from('sales').insert(payloadToInsert).select('id').single();
+          final saleInsert = await _db.from('sales').insert(payloadToInsert).select('id').single().timeout(const Duration(seconds: 4));
           response = saleInsert['id'];
         } catch (dbErr) {
           final errStr = dbErr.toString();
@@ -802,40 +803,43 @@ class ApiService {
             payloadToInsert.remove('invoice_number');
             payloadToInsert.remove('user_name');
             try {
-              final saleInsert = await _db.from('sales').insert(payloadToInsert).select('id').single();
+              final saleInsert = await _db.from('sales').insert(payloadToInsert).select('id').single().timeout(const Duration(seconds: 4));
               response = saleInsert['id'];
             } catch (_) {}
           }
         }
 
-        if (response != null) {
+        if (response != null && itemsForRpc.isNotEmpty) {
+          final List<Map<String, dynamic>> saleItemPayloads = [];
           for (var item in itemsForRpc) {
+            saleItemPayloads.add({
+              'sale_id': response,
+              'invoice_number': invoiceNumber,
+              if (item['item_id'] != null) 'item_id': item['item_id'],
+              'item_name': item['name'],
+              'quantity': item['quantity'],
+              'unit_price': item['unit_price'],
+              'subtotal': item['subtotal'],
+              'final_amount': grandTotal,
+            });
+          }
+          try {
+            await _db.from('sale_items').insert(saleItemPayloads);
+          } catch (siErr) {
+            // Fallback for minimal schemas
             try {
-              final saleItemPayload = <String, dynamic>{
-                'sale_id': response,
-                'invoice_number': invoiceNumber,
-                if (item['item_id'] != null) 'item_id': item['item_id'],
-                'item_name': item['name'],
-                'quantity': item['quantity'],
-                'unit_price': item['unit_price'],
-                'subtotal': item['subtotal'],
-                'final_amount': grandTotal,
-              };
-              try {
-                await _db.from('sale_items').insert(saleItemPayload);
-              } catch (siErr) {
-                final errStr = siErr.toString();
-                if (errStr.contains('invoice_number') || errStr.contains('item_name') || errStr.contains('final_amount')) {
-                  saleItemPayload.remove('invoice_number');
-                  saleItemPayload.remove('item_name');
-                  saleItemPayload.remove('final_amount');
-                  if (item['item_id'] != null) {
-                    await _db.from('sale_items').insert(saleItemPayload);
-                  }
-                }
+              final sanitizedList = saleItemPayloads.map((p) {
+                final copy = Map<String, dynamic>.from(p);
+                copy.remove('invoice_number');
+                copy.remove('item_name');
+                copy.remove('final_amount');
+                return copy;
+              }).where((p) => p['item_id'] != null).toList();
+              if (sanitizedList.isNotEmpty) {
+                await _db.from('sale_items').insert(sanitizedList);
               }
-            } catch (itemErr) {
-              debugPrint('[ApiService] Insert sale_item failed: $itemErr');
+            } catch (fallbackErr) {
+              debugPrint('[ApiService] Batch insert sale_items failed: $fallbackErr');
             }
           }
         }
@@ -877,121 +881,171 @@ class ApiService {
   }
 
   Future<void> deductStockForSale(List<dynamic> items) async {
+    if (items.isEmpty) return;
+
+    // 1. Immediately deduct all items in local cache for instant UI response
     for (var saleItem in items) {
+      final rawId = (saleItem['itemId'] ?? saleItem['id'] ?? '').toString();
+      if (rawId.isEmpty) continue;
+      String realItemId = rawId;
+      String soldColor = saleItem['color']?.toString().trim() ?? '';
+      String soldSize = saleItem['size']?.toString().trim() ?? '';
+      if (rawId.contains('_')) {
+        final parts = rawId.split('_');
+        realItemId = parts.first;
+        if (soldColor.isEmpty && parts.length > 1) soldColor = parts[1].trim();
+        if (soldSize.isEmpty && parts.length > 2) soldSize = parts[2].trim();
+      }
+      final qty = int.tryParse(saleItem['quantity'].toString()) ?? 1;
+      DataRepository().deductItemStockLocally(
+        realItemId,
+        color: soldColor,
+        size: soldSize,
+        quantity: qty,
+      );
+    }
+
+    // 2. Process remote database deductions concurrently in parallel
+    try {
+      await Future.wait(
+        items.map((saleItem) => _deductSingleItemStock(saleItem)),
+      ).timeout(const Duration(seconds: 4), onTimeout: () => []);
+    } catch (_) {}
+  }
+
+  Future<void> _deductSingleItemStock(dynamic saleItem) async {
+    try {
+      final rawId = (saleItem['itemId'] ?? saleItem['id'] ?? '').toString();
+      if (rawId.isEmpty) return;
+
+      String realItemId = rawId;
+      String soldColor = saleItem['color']?.toString().trim() ?? '';
+      String soldSize = saleItem['size']?.toString().trim() ?? '';
+
+      if (rawId.contains('_')) {
+        final parts = rawId.split('_');
+        realItemId = parts.first;
+        if (soldColor.isEmpty && parts.length > 1) soldColor = parts[1].trim();
+        if (soldSize.isEmpty && parts.length > 2) soldSize = parts[2].trim();
+      }
+
+      if (!_isValidUuid(realItemId)) return;
+
+      final qty = int.tryParse(saleItem['quantity'].toString()) ?? 1;
+
+      // Fetch items_size records for this item from database
+      List<dynamic> sizeRows = [];
       try {
-        final rawId = (saleItem['itemId'] ?? saleItem['id'] ?? '').toString();
-        if (rawId.isEmpty) continue;
+        sizeRows = await _db
+            .from('items_size')
+            .select()
+            .eq('item_id', realItemId);
+      } catch (e) {
+        debugPrint('[ApiService] Fetch items_size warning in deductStockForSale: $e');
+      }
 
-        String realItemId = rawId;
-        if (rawId.contains('_')) {
-          realItemId = rawId.split('_').first;
-        }
+      if (sizeRows.isNotEmpty) {
+        Map<String, dynamic>? matchedRow;
 
-        if (!_isValidUuid(realItemId)) continue;
-
-        final qty = int.tryParse(saleItem['quantity'].toString()) ?? 1;
-        final String soldColor = saleItem['color']?.toString().trim() ?? '';
-        final String soldSize = saleItem['size']?.toString().trim() ?? '';
-
-        final row = await _db.from('items').select().eq('id', realItemId).maybeSingle();
-        if (row == null) continue;
-
-        int currentStock = int.tryParse(row['stock']?.toString() ?? '0') ?? 0;
-        int newStock = (currentStock - qty).clamp(0, 999999);
-
-        final updateData = <String, dynamic>{
-          'stock': newStock,
-        };
-
-        final bool hasVariants = row['has_variants'] == true || (row['variants'] != null && (row['variants'] as List).isNotEmpty);
-        if (hasVariants && row['variants'] != null) {
-          try {
-            final rawVars = row['variants'] as List;
-            final List<ItemVariant> variants = rawVars
-                .map((v) => ItemVariant.fromJson(Map<String, dynamic>.from(v as Map)))
-                .toList();
-
-            bool sizeDeducted = false;
-
-            // 1st Pass: Try matching color and size (case-insensitive & trimmed)
-            for (var variantObj in variants) {
-              final bool colorMatches = soldColor.isEmpty ||
-                  variantObj.color.trim().toLowerCase() == soldColor.toLowerCase() ||
-                  variantObj.color.trim().toLowerCase() == 'default';
-              if (colorMatches) {
-                for (var sz in variantObj.sizes) {
-                  final bool sizeMatches = soldSize.isEmpty ||
-                      sz.size.trim().toLowerCase() == soldSize.toLowerCase();
-                  if (sizeMatches) {
-                    sz.stock = (sz.stock - qty).clamp(0, 999999);
-                    sizeDeducted = true;
-                  }
-                }
-              }
-            }
-
-            // 2nd Pass (Fallback): If color match didn't deduct size, match size across all variants
-            if (!sizeDeducted && soldSize.isNotEmpty) {
-              for (var variantObj in variants) {
-                for (var sz in variantObj.sizes) {
-                  if (sz.size.trim().toLowerCase() == soldSize.toLowerCase()) {
-                    sz.stock = (sz.stock - qty).clamp(0, 999999);
-                    sizeDeducted = true;
-                  }
-                }
-              }
-            }
-
-            // 3rd Pass (Fallback): If no size was matched, deduct from the first variant size with stock > 0
-            if (!sizeDeducted && variants.isNotEmpty) {
-              for (var variantObj in variants) {
-                for (var sz in variantObj.sizes) {
-                  if (sz.stock > 0) {
-                    sz.stock = (sz.stock - qty).clamp(0, 999999);
-                    sizeDeducted = true;
-                    break;
-                  }
-                }
-                if (sizeDeducted) break;
-              }
-            }
-
-            // Recalculate total matrix stock from variants
-            int totalMatrixStock = 0;
-            for (var v in variants) {
-              totalMatrixStock += v.totalStock;
-            }
-            updateData['stock'] = totalMatrixStock;
-            updateData['variants'] = variants.map((v) => v.toJson()).toList();
-          } catch (varErr) {
-            debugPrint('[ApiService] Error updating variant matrix stock: $varErr');
+        // 1st Pass: Match color/variant_name and size
+        for (var r in sizeRows) {
+          final rColor = (r['variant_name'] ?? r['color'] ?? '').toString().trim().toLowerCase();
+          final rSize = (r['size'] ?? '').toString().trim().toLowerCase();
+          final bool colorMatch = soldColor.isEmpty ||
+              soldColor.toLowerCase() == 'default' ||
+              rColor == soldColor.toLowerCase() ||
+              rColor.isEmpty;
+          final bool sizeMatch = soldSize.isEmpty || rSize == soldSize.toLowerCase();
+          if (colorMatch && sizeMatch) {
+            matchedRow = r;
+            break;
           }
         }
 
-        updateData['stock_updated_at'] = DateTime.now().toIso8601String();
-
-        try {
-          await _db.from('items').update(updateData).eq('id', realItemId);
-        } catch (upErr) {
-          if (upErr.toString().contains('variants') || upErr.toString().contains('PGRST204')) {
-            updateData.remove('variants');
-            await _db.from('items').update(updateData).eq('id', realItemId);
+        // 2nd Pass: Match size across all variants
+        if (matchedRow == null && soldSize.isNotEmpty) {
+          for (var r in sizeRows) {
+            final rSize = (r['size'] ?? '').toString().trim().toLowerCase();
+            if (rSize == soldSize.toLowerCase()) {
+              matchedRow = r;
+              break;
+            }
           }
         }
 
-        if (updateData['variants'] != null && updateData['variants'] is List) {
-          await _syncRelationalVariants(
-            realItemId,
-            updateData['variants'] as List<dynamic>,
-            itemName: (row['name'] ?? row['item_name'])?.toString(),
+        // 3rd Pass: Match first with stock > 0
+        if (matchedRow == null) {
+          for (var r in sizeRows) {
+            final sVal = int.tryParse(r['stock']?.toString() ?? '0') ?? 0;
+            if (sVal > 0) {
+              matchedRow = r;
+              break;
+            }
+          }
+        }
+
+        // 4th Pass: Fallback to first row
+        final targetRow = matchedRow ?? sizeRows.first;
+
+        final curSizeStock = int.tryParse(targetRow['stock']?.toString() ?? '0') ?? 0;
+        final newSizeStock = (curSizeStock - qty).clamp(0, 999999);
+        targetRow['stock'] = newSizeStock;
+
+        final updateFutures = <Future>[];
+
+        // Directly UPDATE the matched items_size row in Supabase
+        updateFutures.add(
+          _db.from('items_size').update({
+            'stock': newSizeStock,
+            'updated_at': DateTime.now().toIso8601String(),
+          }).eq('id', targetRow['id']).catchError((szUpErr) {
+            debugPrint('[ApiService] Error updating items_size row: $szUpErr');
+            return null;
+          }),
+        );
+
+        // Also update legacy item_variant_sizes if present
+        if (targetRow['variant_id'] != null) {
+          updateFutures.add(
+            _db.from('item_variant_sizes').update({
+              'stock': newSizeStock,
+              'updated_at': DateTime.now().toIso8601String(),
+            }).eq('variant_id', targetRow['variant_id']).eq('size', targetRow['size']).catchError((_) => null),
           );
         }
 
-        // Update local DataRepository cache immediately
-        DataRepository().updateLocalItemStock(realItemId, updateData);
-      } catch (e) {
-        debugPrint('[ApiService] Error deducting stock for item ($saleItem): $e');
+        // Calculate new aggregate total stock from all sizeRows
+        int totalAggregatedStock = 0;
+        for (var r in sizeRows) {
+          totalAggregatedStock += (int.tryParse(r['stock']?.toString() ?? '0') ?? 0);
+        }
+
+        // Update items table total stock
+        updateFutures.add(
+          _db.from('items').update({
+            'stock': totalAggregatedStock,
+            'stock_updated_at': DateTime.now().toIso8601String(),
+          }).eq('id', realItemId).catchError((itemUpErr) {
+            debugPrint('[ApiService] Error updating items aggregate stock: $itemUpErr');
+            return null;
+          }),
+        );
+
+        await Future.wait(updateFutures);
+      } else {
+        // Fallback: If no items_size rows exist, directly decrement stock on items table
+        final row = await _db.from('items').select('stock').eq('id', realItemId).maybeSingle();
+        if (row != null) {
+          final curStock = int.tryParse(row['stock']?.toString() ?? '0') ?? 0;
+          final newStock = (curStock - qty).clamp(0, 999999);
+          await _db.from('items').update({
+            'stock': newStock,
+            'stock_updated_at': DateTime.now().toIso8601String(),
+          }).eq('id', realItemId);
+        }
       }
+    } catch (e) {
+      debugPrint('[ApiService] Error deducting stock for item ($saleItem): $e');
     }
   }
 
@@ -1393,7 +1447,22 @@ class ApiService {
   static Map<String, dynamic> _normalizeItemRow(Map<String, dynamic> r) {
     List<dynamic> variants = [];
     if (r['variants'] is List && (r['variants'] as List).isNotEmpty) {
-      variants = r['variants'] as List;
+      variants = (r['variants'] as List).map((v) {
+        if (v is Map) {
+          final vMap = Map<String, dynamic>.from(v);
+          if (vMap['sizes'] is List) {
+            final sList = List<dynamic>.from(vMap['sizes']);
+            sList.sort((a, b) {
+              final sA = (a is Map ? (a['size'] ?? '') : '').toString();
+              final sB = (b is Map ? (b['size'] ?? '') : '').toString();
+              return ItemVariant.compareSizes(sA, sB);
+            });
+            vMap['sizes'] = sList;
+          }
+          return vMap;
+        }
+        return v;
+      }).toList();
     } else if (r['items_size'] is List && (r['items_size'] as List).isNotEmpty) {
       final relSizes = r['items_size'] as List;
       final Map<String, List<dynamic>> colorMap = {};
@@ -1403,11 +1472,17 @@ class ApiService {
         colorMap.putIfAbsent(colorKey, () => []).add(sz);
       }
       variants = colorMap.entries.map((e) {
+        final sortedList = List<dynamic>.from(e.value);
+        sortedList.sort((a, b) {
+          final sA = (a['size'] ?? '').toString();
+          final sB = (b['size'] ?? '').toString();
+          return ItemVariant.compareSizes(sA, sB);
+        });
         return {
-          'id': e.value.first['variant_id'] ?? e.value.first['id'],
+          'id': sortedList.first['variant_id'] ?? sortedList.first['id'],
           'color': e.key,
           'image_url': r['image_url'] ?? '',
-          'sizes': e.value.map((sz) {
+          'sizes': sortedList.map((sz) {
             return {
               'id': sz['id'],
               'size': sz['size'] ?? '',
@@ -1422,7 +1497,12 @@ class ApiService {
     } else if (r['item_variants'] is List && (r['item_variants'] as List).isNotEmpty) {
       final relVars = r['item_variants'] as List;
       variants = relVars.map((v) {
-        final relSizes = v['item_variant_sizes'] is List ? (v['item_variant_sizes'] as List) : [];
+        final relSizes = v['item_variant_sizes'] is List ? List<dynamic>.from(v['item_variant_sizes']) : [];
+        relSizes.sort((a, b) {
+          final sA = (a['size'] ?? '').toString();
+          final sB = (b['size'] ?? '').toString();
+          return ItemVariant.compareSizes(sA, sB);
+        });
         return {
           'id': v['id'],
           'color': v['color'] ?? 'Default',
@@ -1518,8 +1598,12 @@ class ApiService {
       final categoryDetails = itemDetails['categories'] ?? {};
       final qty = item['quantity'] ?? 0;
       final unitPrice = double.tryParse(item['unit_price']?.toString() ?? '0') ?? 0.0;
-      final subtotal = double.tryParse(item['subtotal']?.toString() ?? '0') ?? 0.0;
-      final costPrice = double.tryParse(itemDetails['price']?.toString() ?? '0') ?? 0.0;
+      final subtotal = double.tryParse(item['subtotal']?.toString() ?? '0') ??
+          (unitPrice * (qty is int ? qty : int.tryParse(qty.toString()) ?? 1));
+      final costPrice = double.tryParse(
+              (item['cost_price'] ?? item['costPrice'] ?? itemDetails['cost_price'] ?? itemDetails['costPrice'] ?? itemDetails['price'] ?? '0')
+                  .toString()) ??
+          0.0;
 
       final String resolvedName = (itemDetails['name'] ??
               itemDetails['item_name'] ??
@@ -1621,6 +1705,7 @@ class ApiService {
       'paymentMethod': r['payment_mode'] ?? 'Cash',
       'status': r['status'] ?? 'Received',
       'branch': r['branches']?['name'] ?? '',
+      'billUrl': r['bill_media_url'] ?? r['bill_url'] ?? r['billMediaUrl'] ?? '',
       'createdAt': r['created_at'],
     };
   }
@@ -1630,7 +1715,9 @@ class ApiService {
     try {
       final rows = await _db.from('store_settings').select('*').limit(1);
       if (rows.isNotEmpty) {
-        return Map<String, dynamic>.from(rows.first);
+        final data = Map<String, dynamic>.from(rows.first);
+        _cachedStoreSettingsId = data['id']?.toString();
+        return data;
       }
     } catch (e) {
       debugPrint('[ApiService] getStoreSettings warning: $e');
@@ -1640,14 +1727,74 @@ class ApiService {
 
   Future<void> saveStoreSettings(Map<String, dynamic> settingsData) async {
     try {
+      if (_cachedStoreSettingsId != null && _cachedStoreSettingsId!.isNotEmpty) {
+        await _db.from('store_settings').update(settingsData).eq('id', _cachedStoreSettingsId!);
+        return;
+      }
       final existing = await getStoreSettings();
       if (existing != null && existing['id'] != null) {
-        await _db.from('store_settings').update(settingsData).eq('id', existing['id']);
+        _cachedStoreSettingsId = existing['id'].toString();
+        await _db.from('store_settings').update(settingsData).eq('id', _cachedStoreSettingsId!);
       } else {
-        await _db.from('store_settings').insert(settingsData);
+        final inserted = await _db.from('store_settings').insert(settingsData).select('id').maybeSingle();
+        if (inserted != null && inserted['id'] != null) {
+          _cachedStoreSettingsId = inserted['id'].toString();
+        }
       }
     } catch (e) {
       debugPrint('[ApiService] saveStoreSettings warning: $e');
+    }
+  }
+
+  // ─── PAYMENT TRANSACTIONS ──────────────────────────────────────────
+  Future<void> recordPaymentTransaction(Map<String, dynamic> txnData) async {
+    try {
+      final payload = Map<String, dynamic>.from(txnData);
+      // Remove local client UUID if table auto-generates it
+      if (payload['id'] != null && payload['id'].toString().startsWith('PAY-')) {
+        payload.remove('id');
+      }
+      await _db.from('payment_transactions').insert(payload);
+    } catch (e) {
+      debugPrint('[ApiService] recordPaymentTransaction info (safe fallback): $e');
+    }
+  }
+
+  Future<void> updatePaymentTransactionStatus({
+    required String transactionRefId,
+    required String status,
+    String? gatewayTxnId,
+    DateTime? verifiedAt,
+  }) async {
+    try {
+      final payload = <String, dynamic>{
+        'payment_status': status,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      if (gatewayTxnId != null) {
+        payload['gateway_txn_id'] = gatewayTxnId;
+      }
+      if (verifiedAt != null) {
+        payload['verified_at'] = verifiedAt.toIso8601String();
+      }
+      await _db.from('payment_transactions')
+          .update(payload)
+          .eq('transaction_ref_id', transactionRefId);
+    } catch (e) {
+      debugPrint('[ApiService] updatePaymentTransactionStatus info: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getPaymentTransactions(String invoiceNumber) async {
+    try {
+      final rows = await _db.from('payment_transactions')
+          .select('*')
+          .eq('invoice_number', invoiceNumber)
+          .order('created_at', ascending: false);
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('[ApiService] getPaymentTransactions warning: $e');
+      return [];
     }
   }
 }

@@ -386,6 +386,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     bool isError, {
     bool isMetric = false,
     String? iconUrl,
+    Color? valueColor,
   }) {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -478,7 +479,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             style: GoogleFonts.manrope(
               fontSize: 34,
               fontWeight: FontWeight.w900,
-              color: isError ? AppTheme.error : AppTheme.primary,
+              color: isError
+                  ? AppTheme.error
+                  : (valueColor ??
+                      (title == 'TOTAL SALES TODAY'
+                          ? AppTheme.salesValueColor
+                          : AppTheme.primary)),
             ),
           ),
           const SizedBox(height: 6),
@@ -760,8 +766,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       decoration: BoxDecoration(
-        color: const Color(0xFFF2F4F5),
+        color: AppTheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -808,7 +821,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const yAxisWidth = 24.0;
               final availableChartWidth =
                   constraints.maxWidth - yAxisWidth - 4.0;
-              final useExpanded = entries.length <= 8;
+              final numEntries = entries.isEmpty ? 1 : entries.length;
+              final slotWidth = availableChartWidth / numEntries;
+              final useExpanded = availableChartWidth >= (numEntries * 32.0) || numEntries <= 12;
+              final customBarWidth = (slotWidth < 42.0)
+                  ? (slotWidth * 0.55).clamp(16.0, 32.0)
+                  : null;
 
               Widget barsRow = Row(
                 mainAxisAlignment: useExpanded
@@ -828,6 +846,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     isSelected: isSelected,
                     isCurrent: isCurrent,
                     currentBadgeLabel: currentBadgeLabel,
+                    customBarWidth: customBarWidth,
                     onTap: () {
                       setState(() {
                         if (_selectedBarLabel == entry.key) {
@@ -843,11 +862,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 }).toList(),
               );
 
+              final minScrollWidth = entries.length * 48.0;
               Widget scrollableBars = !useExpanded
                   ? SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       physics: const BouncingScrollPhysics(),
-                      child: barsRow,
+                      child: SizedBox(
+                        width: availableChartWidth > minScrollWidth
+                            ? availableChartWidth
+                            : minScrollWidth,
+                        child: barsRow,
+                      ),
                     )
                   : SizedBox(width: availableChartWidth, child: barsRow);
 
@@ -926,7 +951,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppTheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(30),
       ),
       child: FittedBox(
@@ -1018,6 +1043,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required bool isCurrent,
     required String? currentBadgeLabel,
     required VoidCallback onTap,
+    double? customBarWidth,
   }) {
     final formattedVal = '₹${NumberFormat('#,##,##0').format(value)}';
     final calcHeight =
@@ -1103,7 +1129,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: (isSelected || isCurrent) ? 38 : 34,
+                    width: customBarWidth ?? ((isSelected || isCurrent) ? 38 : 34),
                     height: calcHeight,
                     decoration: BoxDecoration(
                       color: barColor,
